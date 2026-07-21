@@ -18,6 +18,10 @@ router.post('/register', async (req, res) => {
   try {
     const { username, email, password, age, gender } = req.body;
 
+    if (age && parseInt(age) < 18) {
+      return res.status(400).json({ msg: 'You must be at least 18 years old to register.' });
+    }
+
     // Check if user exists
     const { data: existingUser } = await supabase
       .from('users')
@@ -73,14 +77,18 @@ router.post('/register', async (req, res) => {
 // Login
 router.post('/login', async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { loginId, password } = req.body;
 
-    // 1. Fetch user by email
-    const { data: userProfile, error: profileError } = await supabase
-      .from('users')
-      .select('*')
-      .eq('email', email)
-      .maybeSingle();
+    // 1. Fetch user by email or username
+    const isEmail = loginId && loginId.includes('@');
+    let query = supabase.from('users').select('*');
+    if (isEmail) {
+      query = query.eq('email', loginId);
+    } else {
+      query = query.eq('username', loginId);
+    }
+
+    const { data: userProfile, error: profileError } = await query.maybeSingle();
 
     if (profileError || !userProfile) {
       return res.status(400).json({ msg: 'Invalid login credentials' });
@@ -108,6 +116,56 @@ router.post('/login', async (req, res) => {
         id: userProfile.id, 
         username: userProfile.username, 
         email: userProfile.email 
+      } 
+    });
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).json({ msg: 'Server error' });
+  }
+});
+
+// Guest Login
+router.post('/guest-login', async (req, res) => {
+  try {
+    const { name, age, gender } = req.body;
+    
+    // Basic validation
+    if (age && parseInt(age) < 18) {
+      return res.status(400).json({ msg: 'You must be at least 18 years old to proceed as a guest.' });
+    }
+
+    const guestId = crypto.randomUUID();
+    const cleanName = (name || 'Guest').replace(/[^a-zA-Z0-9]/g, '');
+    const guestUsername = `${cleanName}_${Math.floor(1000 + Math.random() * 9000)}`;
+    const guestEmail = `${guestUsername.toLowerCase()}@guest.local`;
+
+    const newUser = {
+      id: guestId,
+      username: guestUsername,
+      email: guestEmail,
+      password: 'handled_by_guest_auth', // dummy password
+      age: age ? parseInt(age) : null,
+      gender: gender || 'Other',
+      is_verified: true, // Guests don't need email verification
+    };
+
+    const { error: insertError } = await supabase
+      .from('users')
+      .insert([newUser]);
+
+    if (insertError) {
+      console.error('Guest Insert Error:', insertError);
+      return res.status(500).json({ msg: 'Server error creating guest user.' });
+    }
+
+    const token = generateToken(guestId);
+
+    res.json({ 
+      token, 
+      user: { 
+        id: guestId, 
+        username: guestUsername, 
+        email: guestEmail 
       } 
     });
   } catch (err) {

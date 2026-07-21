@@ -7,6 +7,7 @@ import RegisterModal from './components/RegisterModal';
 import ForgotPasswordModal from './components/ForgotPasswordModal';
 import ResetPasswordModal from './components/ResetPasswordModal';
 import MyProfileModal from './components/MyProfileModal';
+import GuestLoginModal from './components/GuestLoginModal';
 import AuthContext from './context/AuthContext';
 import UserSidebar from './components/UserSidebar';
 import CallOverlay from './components/CallOverlay';
@@ -21,11 +22,14 @@ function App() {
   const [showForgotPassword, setShowForgotPassword] = useState(false);
   const [showResetPassword, setShowResetPassword] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
+  const [showGuestLogin, setShowGuestLogin] = useState(false);
   const [resetToken, setResetToken] = useState(null);
   const [activeChat, setActiveChat] = useState('home');
   const [users, setUsers] = useState([]);
   const [onlineUsers, setOnlineUsers] = useState(new Set());
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(true);
+  const [isSearchingStranger, setIsSearchingStranger] = useState(false);
+  const [strangerUserIds, setStrangerUserIds] = useState({}); // room -> hidden userId
 
   const handleSetActiveChat = (chatId) => {
     setActiveChat(chatId);
@@ -177,11 +181,26 @@ function App() {
       resetCallSession();
     };
 
+    const handleStrangerMatch = ({ room, otherUserId }) => {
+      setIsSearchingStranger(false);
+      setStrangerUserIds(prev => ({ ...prev, [room]: otherUserId }));
+      setActiveChat(room);
+      if (window.innerWidth <= 768) {
+        setMobileSidebarOpen(false);
+      }
+    };
+
+    const handleStrangerLeft = () => {
+      alert("The stranger has left the chat.");
+    };
+
     socket.on('call_incoming', handleIncomingCall);
     socket.on('call_accepted', handleCallAccepted);
     socket.on('ice_candidate', handleIceCandidate);
     socket.on('call_ended', handleCallEnded);
     socket.on('call_declined', handleCallDeclined);
+    socket.on('stranger_match', handleStrangerMatch);
+    socket.on('stranger_left', handleStrangerLeft);
 
     return () => {
       socket.off('call_incoming', handleIncomingCall);
@@ -189,6 +208,8 @@ function App() {
       socket.off('ice_candidate', handleIceCandidate);
       socket.off('call_ended', handleCallEnded);
       socket.off('call_declined', handleCallDeclined);
+      socket.off('stranger_match', handleStrangerMatch);
+      socket.off('stranger_left', handleStrangerLeft);
     };
   }, [user]);
 
@@ -232,6 +253,8 @@ function App() {
     localStorage.setItem('token', jwtToken);
     localStorage.setItem('user', JSON.stringify(userData));
     setShowLogin(false);
+    setShowGuestLogin(false);
+    setShowRegister(false);
   };
 
   const logout = () => {
@@ -270,6 +293,9 @@ function App() {
             setUsers={setUsers}
             onlineUsers={onlineUsers}
             mobileSidebarOpen={mobileSidebarOpen}
+            socket={socket}
+            isSearchingStranger={isSearchingStranger}
+            setIsSearchingStranger={setIsSearchingStranger}
           />
           <ChatBox
             socket={socket}
@@ -278,6 +304,7 @@ function App() {
             users={users}
             onlineUsers={onlineUsers}
             onBackToSidebar={() => setMobileSidebarOpen(true)}
+            strangerUserIds={strangerUserIds}
           />
         </div>
 
@@ -285,9 +312,12 @@ function App() {
           <LoginModal 
             onClose={() => setShowLogin(false)} 
             onForgotPassword={() => { setShowLogin(false); setShowForgotPassword(true); }}
+            onRegister={() => { setShowLogin(false); setShowRegister(true); }}
+            onGuestLogin={() => { setShowLogin(false); setShowGuestLogin(true); }}
           />
         )}
         {showRegister && <RegisterModal onClose={() => setShowRegister(false)} />}
+        {showGuestLogin && <GuestLoginModal onClose={() => setShowGuestLogin(false)} />}
         {showForgotPassword && <ForgotPasswordModal onClose={() => setShowForgotPassword(false)} />}
         {showResetPassword && <ResetPasswordModal token={resetToken} onClose={() => setShowResetPassword(false)} />}
         {showProfile && <MyProfileModal onClose={() => setShowProfile(false)} />}

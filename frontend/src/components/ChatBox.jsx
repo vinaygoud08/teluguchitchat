@@ -2,6 +2,7 @@ import React, { useEffect, useState, useRef, memo } from 'react';
 import axios from 'axios';
 import MessageInput from './MessageInput';
 import { useAuth } from '../context/AuthContext';
+import { User, UserRound, CircleUser } from 'lucide-react';
 
 // Inline warning modal
 const RestartWarningModal = ({ onConfirm, onCancel }) => (
@@ -20,7 +21,7 @@ const RestartWarningModal = ({ onConfirm, onCancel }) => (
   </div>
 );
 
-const MessageItem = memo(({ msg, isSelf }) => {
+const MessageItem = memo(({ msg, isSelf, senderColor, senderIcon }) => {
   const timeStr = msg.timestamp
     ? new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     : '';
@@ -33,7 +34,12 @@ const MessageItem = memo(({ msg, isSelf }) => {
   return (
     <div className={`message ${isSystemMsg ? 'system' : isSelf ? 'self' : 'other'}`}>
       {!isSelf && !isSystemMsg && (
-        <div className="message-sender">{msg.sender}</div>
+        <div className="message-sender" style={senderColor ? { color: senderColor, display: 'flex', alignItems: 'center', gap: '4px' } : { display: 'flex', alignItems: 'center', gap: '4px' }}>
+          {senderIcon === 'male' && <User size={14} color={senderColor} />}
+          {senderIcon === 'female' && <UserRound size={14} color={senderColor} />}
+          {senderIcon === 'other' && <CircleUser size={14} color={senderColor} />}
+          {msg.sender}
+        </div>
       )}
       <div className="message-content">
         {msg.text && <div>{msg.text}</div>}
@@ -51,7 +57,7 @@ const MessageItem = memo(({ msg, isSelf }) => {
   );
 });
 
-const ChatBox = ({ socket, activeChat, onInitiateCall, users = [], onlineUsers = new Set(), onBackToSidebar }) => {
+const ChatBox = ({ socket, activeChat, onInitiateCall, users = [], onlineUsers = new Set(), onBackToSidebar, strangerUserIds }) => {
   const { user, token } = useAuth();
   const [messages, setMessages] = useState({});
   const [showRestartWarning, setShowRestartWarning] = useState(false);
@@ -151,6 +157,27 @@ const ChatBox = ({ socket, activeChat, onInitiateCall, users = [], onlineUsers =
   };
 
   const currentMessages = messages[activeChat] || [];
+  const isStrangerChat = activeChat.startsWith('stranger_');
+
+  const handleAddStranger = async () => {
+    const targetId = strangerUserIds?.[activeChat];
+    if (!targetId) return;
+    try {
+      await axios.post(`/api/users/friend-request/${targetId}`, {}, {
+        headers: { 'x-auth-token': token }
+      });
+      alert('Friend request sent! Once they accept from the Requests tab, you will see their identity.');
+    } catch (err) {
+      alert(err.response?.data?.msg || 'Error sending friend request');
+    }
+  };
+
+  const handleLeaveStranger = () => {
+    socket.emit('leave_stranger_room', activeChat);
+    if (onBackToSidebar) {
+      onBackToSidebar();
+    }
+  };
 
   // Chat Header
   const renderHeader = () => {
@@ -172,12 +199,27 @@ const ChatBox = ({ socket, activeChat, onInitiateCall, users = [], onlineUsers =
             <div className="chat-header-name">Random Chat</div>
             <div className="chat-header-status">Public conversation — open to everyone</div>
           </div>
+        </div>
+      );
+    }
+
+    if (isStrangerChat) {
+      return (
+        <div className="chat-header">
+          {onBackToSidebar && (
+            <button className="chat-header-btn" onClick={handleLeaveStranger} style={{ marginRight: 2 }} aria-label="Back">←</button>
+          )}
+          <div className="avatar" style={{ width: 40, height: 40, background: '#555' }}>👤</div>
+          <div style={{ flex: 1 }}>
+            <div className="chat-header-name">Stranger</div>
+            <div className="chat-header-status">Anonymous Chat</div>
+          </div>
           <div className="chat-header-actions">
-            <button
-              className="chat-header-btn restart-btn"
-              onClick={() => setShowRestartWarning(true)}
-            >
-              🔄 Restart Chat
+            <button className="chat-header-btn" onClick={handleAddStranger}>
+              ➕ Add Friend
+            </button>
+            <button className="chat-header-btn restart-btn" onClick={handleLeaveStranger}>
+              ❌ Leave
             </button>
           </div>
         </div>
@@ -254,7 +296,29 @@ const ChatBox = ({ socket, activeChat, onInitiateCall, users = [], onlineUsers =
 
         {currentMessages.map((msg, idx) => {
           const isSelf = user && msg.sender === user.username;
-          return <MessageItem key={msg.id || idx} msg={msg} isSelf={isSelf} />;
+          let senderColor = '#333'; // default black/dark-gray for 'other'
+          let senderIcon = 'other';
+          if (!isSelf && msg.sender) {
+            const senderInfo = users.find(u => u.username === msg.sender);
+            if (senderInfo) {
+              const g = senderInfo.gender ? senderInfo.gender.toLowerCase() : '';
+              if (g === 'male') {
+                senderColor = '#2196F3'; // blue
+                senderIcon = 'male';
+              } else if (g === 'female') {
+                senderColor = '#E91E63'; // pink
+                senderIcon = 'female';
+              }
+            }
+          }
+          let msgToPass = msg;
+          if (isStrangerChat && !isSelf) {
+            msgToPass = { ...msg, sender: 'Stranger' };
+            senderColor = '#555';
+            senderIcon = 'other';
+          }
+
+          return <MessageItem key={msg.id || idx} msg={msgToPass} isSelf={isSelf} senderColor={senderColor} senderIcon={senderIcon} />;
         })}
         <div ref={messagesEndRef} />
       </div>

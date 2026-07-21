@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import ProfileEditor from './ProfileEditor';
 import ProfileViewer from './ProfileViewer';
 
-const UserSidebar = ({ activeChat, setActiveChat, users, onlineUsers = new Set(), mobileSidebarOpen = true }) => {
+const UserSidebar = ({ activeChat, setActiveChat, users, onlineUsers = new Set(), mobileSidebarOpen = true, socket, isSearchingStranger, setIsSearchingStranger }) => {
   const { user, token } = useAuth();
   const [tab, setTab] = useState('chats'); // 'chats', 'requests', 'discover'
   const [showEditor, setShowEditor] = useState(false);
@@ -30,9 +30,13 @@ const UserSidebar = ({ activeChat, setActiveChat, users, onlineUsers = new Set()
     u.username.toLowerCase().includes(search.toLowerCase())
   );
 
-  const filteredUsers = users.filter(u =>
-    u.username.toLowerCase().includes(search.toLowerCase())
-  );
+  const isGuest = (u) => u?.email?.endsWith('@guest.local');
+
+  const filteredUsers = users.filter(u => {
+    if (!u.username.toLowerCase().includes(search.toLowerCase())) return false;
+    if (isGuest(u) && !onlineUsers.has(u.id || u._id)) return false;
+    return true;
+  });
 
   // Helper: get initials from username
   const getInitials = (name) => name ? name[0].toUpperCase() : '?';
@@ -41,6 +45,20 @@ const UserSidebar = ({ activeChat, setActiveChat, users, onlineUsers = new Set()
   const getAvatarStyle = (name) => {
     const hue = name ? (name.charCodeAt(0) * 37 + name.length * 13) % 360 : 200;
     return { background: `linear-gradient(135deg, hsl(${hue}, 65%, 55%), hsl(${(hue + 60) % 360}, 65%, 45%))` };
+  };
+
+  const handleFindStranger = () => {
+    if (!user) {
+      alert("Please login to chat with strangers.");
+      return;
+    }
+    setIsSearchingStranger(true);
+    socket.emit('find_stranger', user.id || user._id);
+  };
+
+  const handleCancelSearch = () => {
+    setIsSearchingStranger(false);
+    socket.emit('leave_stranger_queue');
   };
 
   return (
@@ -121,6 +139,30 @@ const UserSidebar = ({ activeChat, setActiveChat, users, onlineUsers = new Set()
                 </div>
               </div>
             </div>
+
+            {/* Stranger Chat Matchmaking */}
+            {user && (
+              <div 
+                className="sidebar-item" 
+                style={{ background: isSearchingStranger ? '#fff3cd' : '#e8f0fe', cursor: isSearchingStranger ? 'default' : 'pointer' }}
+                onClick={!isSearchingStranger ? handleFindStranger : undefined}
+              >
+                <div className="avatar avatar-public" style={{ background: isSearchingStranger ? '#ffc107' : '#1a73e8' }}>🎲</div>
+                <div className="sidebar-item-meta">
+                  <div className="sidebar-item-top">
+                    <span className="sidebar-item-name" style={{ color: '#000' }}>
+                      {isSearchingStranger ? "Searching..." : "Chat with Stranger"}
+                    </span>
+                  </div>
+                  <div className="sidebar-item-status" style={{ color: '#333' }}>
+                    {isSearchingStranger ? "Looking for a random partner..." : "Start an anonymous 1-on-1 chat"}
+                  </div>
+                </div>
+                {isSearchingStranger && (
+                  <button className="btn-cancel" onClick={(e) => { e.stopPropagation(); handleCancelSearch(); }} style={{ fontSize: '0.7rem', padding: '4px 8px' }}>Cancel</button>
+                )}
+              </div>
+            )}
 
             {/* Private Chats */}
             {user && (
@@ -231,10 +273,12 @@ const UserSidebar = ({ activeChat, setActiveChat, users, onlineUsers = new Set()
                       <span className="sidebar-item-name">{u.username}</span>
                       {isFriend
                         ? <span className="friend-badge">Friend ✓</span>
-                        : <button
-                            className="add-friend-btn"
-                            onClick={(e) => { e.stopPropagation(); handleFriendAction('friend-request', u.id || u._id); }}
-                          >+ Add</button>
+                        : (!isGuest(u) && !isGuest(user) && (
+                            <button
+                              className="add-friend-btn"
+                              onClick={(e) => { e.stopPropagation(); handleFriendAction('friend-request', u.id || u._id); }}
+                            >+ Add</button>
+                          ))
                       }
                     </div>
                     <div className="sidebar-item-status">

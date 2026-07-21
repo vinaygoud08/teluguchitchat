@@ -1,19 +1,62 @@
 import React, { useState } from 'react';
 import axios from 'axios';
+import { Eye, EyeOff } from 'lucide-react';
 
 const RegisterModal = ({ onClose }) => {
+  const [name, setName] = useState('');
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [age, setAge] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [dobDay, setDobDay] = useState('');
+  const [dobMonth, setDobMonth] = useState('');
+  const [dobYear, setDobYear] = useState('');
   const [gender, setGender] = useState('Other');
+  const [termsAccepted, setTermsAccepted] = useState(false);
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
 
+  const handleNameChange = (e) => {
+    const newName = e.target.value;
+    setName(newName);
+    if (newName.trim() !== '') {
+      // Auto-generate username (User ID) based on name
+      const baseName = newName.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+      const randomNum = Math.floor(1000 + Math.random() * 9000);
+      setUsername(`${baseName}_${randomNum}`);
+    } else {
+      setUsername('');
+    }
+  };
+
   const handleRegister = async (e) => {
     e.preventDefault();
+    if (!termsAccepted) {
+      setError('You must agree to the terms and conditions and verify you are 18+.');
+      return;
+    }
+
+    if (!dobDay || !dobMonth || !dobYear) {
+      setError('Please select your full Date of Birth.');
+      return;
+    }
+
+    // Calculate age from dob
+    const birthDate = new Date(`${dobYear}-${dobMonth.padStart(2, '0')}-${dobDay.padStart(2, '0')}`);
+    const today = new Date();
+    let calculatedAge = today.getFullYear() - birthDate.getFullYear();
+    const m = today.getMonth() - birthDate.getMonth();
+    if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
+      calculatedAge--;
+    }
+
+    if (calculatedAge < 18) {
+      setError('You must be at least 18 years old to register.');
+      return;
+    }
+
     try {
-      const res = await axios.post('/api/auth/register', { username, email, password, age, gender });
+      const res = await axios.post('/api/auth/register', { username, email, password, age: calculatedAge, gender });
       setSuccessMsg(res.data.msg);
       setError('');
     } catch (err) {
@@ -36,15 +79,27 @@ const RegisterModal = ({ onClose }) => {
         ) : (
           <form onSubmit={handleRegister}>
             <div className="form-group">
-              <label>Username</label>
+              <label>Name</label>
               <input 
                 type="text" 
                 className="form-control" 
-                value={username} 
-                onChange={e => setUsername(e.target.value)} 
+                value={name} 
+                onChange={handleNameChange} 
                 required 
               />
             </div>
+            {username && (
+              <div className="form-group">
+                <label>System Generated User ID</label>
+                <input 
+                  type="text" 
+                  className="form-control" 
+                  value={username} 
+                  disabled
+                  style={{ backgroundColor: '#f0f0f0' }}
+                />
+              </div>
+            )}
             <div className="form-group">
               <label>Email</label>
               <input 
@@ -57,15 +112,44 @@ const RegisterModal = ({ onClose }) => {
             </div>
             <div style={{ display: 'flex', gap: '10px' }}>
               <div className="form-group" style={{ flex: 1 }}>
-                <label>Age</label>
-                <input 
-                  type="number" 
-                  className="form-control" 
-                  value={age} 
-                  onChange={e => setAge(e.target.value)} 
-                  min="13" max="120"
-                  required 
-                />
+                <label>Date of Birth</label>
+                <div style={{ display: 'flex', gap: '5px' }}>
+                  <select 
+                    className="form-control" 
+                    value={dobDay} 
+                    onChange={e => setDobDay(e.target.value)} 
+                    required
+                    style={{ padding: '8px 4px' }}
+                  >
+                    <option value="">DD</option>
+                    {Array.from({length: 31}, (_, i) => <option key={i+1} value={String(i+1)}>{i+1}</option>)}
+                  </select>
+                  <select 
+                    className="form-control" 
+                    value={dobMonth} 
+                    onChange={e => setDobMonth(e.target.value)} 
+                    required
+                    style={{ padding: '8px 4px' }}
+                  >
+                    <option value="">MM</option>
+                  {['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'].map((m, i) => 
+                    <option key={i+1} value={String(i+1)}>{m}</option>
+                  )}
+                </select>
+                  <select 
+                    className="form-control" 
+                    value={dobYear} 
+                    onChange={e => setDobYear(e.target.value)} 
+                    required
+                    style={{ padding: '8px 4px' }}
+                  >
+                    <option value="">YYYY</option>
+                    {Array.from({length: 100}, (_, i) => {
+                      const year = new Date().getFullYear() - 18 - i;
+                      return <option key={year} value={String(year)}>{year}</option>;
+                    })}
+                  </select>
+                </div>
               </div>
               <div className="form-group" style={{ flex: 1 }}>
                 <label>Gender</label>
@@ -82,13 +166,48 @@ const RegisterModal = ({ onClose }) => {
             </div>
             <div className="form-group">
               <label>Password</label>
+              <div style={{ position: 'relative' }}>
+                <input 
+                  type={showPassword ? "text" : "password"} 
+                  className="form-control" 
+                  value={password} 
+                  onChange={e => setPassword(e.target.value)} 
+                  required 
+                  style={{ paddingRight: '40px' }}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  style={{
+                    position: 'absolute',
+                    right: '10px',
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    background: 'none',
+                    border: 'none',
+                    cursor: 'pointer',
+                    color: '#666',
+                    display: 'flex',
+                    alignItems: 'center',
+                    padding: 0
+                  }}
+                >
+                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
+              </div>
+            </div>
+            <div className="form-group" style={{ display: 'flex', alignItems: 'flex-start', gap: '10px' }}>
               <input 
-                type="password" 
-                className="form-control" 
-                value={password} 
-                onChange={e => setPassword(e.target.value)} 
-                required 
+                type="checkbox" 
+                id="termsCheck"
+                checked={termsAccepted}
+                onChange={(e) => setTermsAccepted(e.target.checked)}
+                style={{ marginTop: '4px' }}
+                required
               />
+              <label htmlFor="termsCheck" style={{ fontSize: '12px', lineHeight: '1.4' }}>
+                I verify that the details provided are correct, that I am 18 years of age or older, and by registering I agree to the Terms and Conditions.
+              </label>
             </div>
             {error && <div className="error-text">{error}</div>}
             <div className="modal-actions">

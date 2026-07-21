@@ -32,6 +32,8 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 // Socket.io logic
 const onlineUsers = new Map(); // socket.id -> userId
 const onlineUsersSet = new Set(); // Set of userIds currently online
+let strangerQueue = []; // Array of { socketId, userId }
+
 io.on('connection', (socket) => {
   console.log('A user connected:', socket.id);
 
@@ -132,9 +134,48 @@ io.on('connection', (socket) => {
     }
   });
 
+  // Anonymous Matchmaking
+  socket.on('find_stranger', (userId) => {
+    // Check if user is already in queue
+    const existingIndex = strangerQueue.findIndex(u => u.userId === userId || u.socketId === socket.id);
+    if (existingIndex !== -1) return;
+
+    // Check if anyone else is waiting
+    if (strangerQueue.length > 0) {
+      const match = strangerQueue.shift(); // Get the first person in queue
+      // Create a unique room for them
+      const roomId = 'stranger_' + match.userId + '_' + userId + '_' + Date.now();
+      
+      // Join both sockets to the new room
+      socket.join(roomId);
+      const matchSocket = io.sockets.sockets.get(match.socketId);
+      if (matchSocket) {
+        matchSocket.join(roomId);
+      }
+
+      // Notify both
+      io.to(socket.id).emit('stranger_match', { room: roomId, otherUserId: match.userId });
+      io.to(match.socketId).emit('stranger_match', { room: roomId, otherUserId: userId });
+    } else {
+      strangerQueue.push({ socketId: socket.id, userId });
+    }
+  });
+
+  socket.on('leave_stranger_queue', () => {
+    strangerQueue = strangerQueue.filter(u => u.socketId !== socket.id);
+  });
+
+  socket.on('leave_stranger_room', (roomId) => {
+    socket.leave(roomId);
+    socket.to(roomId).emit('stranger_left');
+  });
+
   socket.on('disconnect', () => {
     console.log('User disconnected:', socket.id);
     
+    // Remove from stranger queue if they were waiting
+    strangerQueue = strangerQueue.filter(u => u.socketId !== socket.id);
+
     const userId = onlineUsers.get(socket.id);
     if (userId) {
       onlineUsers.delete(socket.id);
@@ -199,6 +240,20 @@ if (process.env.NODE_ENV === 'production') {
     res.sendFile(path.resolve(__dirname, '../frontend', 'dist', 'index.html'));
   });
 }
+
+// Auto-cleanup home chat messages older than 30 minutes
+setInterval(async () => {
+  try {
+    const thirtyMinsAgo = new Date(Date.now() - 30 * 60000).toISOString();
+    await supabase
+      .from('messages')
+      .delete()
+      .eq('room', 'home_chat')
+      .lt('created_at', thirtyMinsAgo);
+  } catch (err) {
+    console.error('Error in auto-cleanup of home_chat:', err);
+  }
+}, 5 * 60000); // Check every 5 minutes
 
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, '0.0.0.0', () => {
