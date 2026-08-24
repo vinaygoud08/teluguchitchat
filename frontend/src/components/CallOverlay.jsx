@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Phone, PhoneOff, Mic, MicOff, Volume2, VolumeX } from 'lucide-react';
+import { Phone, PhoneOff, Mic, MicOff, Volume2, VolumeX, Video, VideoOff } from 'lucide-react';
 
 const CallOverlay = ({
   socket,
@@ -12,7 +12,8 @@ const CallOverlay = ({
   onHangUp,
   onAcceptCall,
   onDeclineCall,
-  role
+  role,
+  callType
 }) => {
   const [isMuted, setIsMuted] = useState(false);
   const [isSpeakerOn, setIsSpeakerOn] = useState(false);
@@ -21,11 +22,20 @@ const CallOverlay = ({
 
   const peerConnectionRef = useRef(null);
   const localStreamRef = useRef(null);
+  const localVideoRef = useRef(null);
   const remoteAudioRef = useRef(null);
   const audioCtxRef = useRef(null);
   const iceCandidateQueue = useRef([]);
   const isRemoteDescriptionSet = useRef(false);
   const processedCandidates = useRef(new Set());
+  const isMountedRef = useRef(true);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   // 1. Manage Synthetic Ringtone / Dial-tone
   useEffect(() => {
@@ -56,17 +66,23 @@ const CallOverlay = ({
 
   // 3. Setup WebRTC peer connection when call becomes 'connected' (for callee) or 'outgoing' (for caller)
   useEffect(() => {
-    if (callState === 'outgoing') {
+    let currentCallState = callState;
+    if (currentCallState === 'outgoing') {
       setupWebRTCAsCaller();
-    } else if (callState === 'connected' && incomingSignal && !peerConnectionRef.current) {
-      // If we are callee and call was accepted, setup connection
+    } else if (currentCallState === 'connected' && incomingSignal && !peerConnectionRef.current) {
       setupWebRTCAsCallee();
     }
 
     return () => {
+      // Only run cleanup if the component unmounts, not on every state change!
+    };
+  }, [callState]); // We removed cleanup from here and moved it to unmount!
+
+  useEffect(() => {
+    return () => {
       cleanupWebRTC();
     };
-  }, [callState]);
+  }, []);
 
   // 4. Handle accepted signal (Caller side gets this when callee accepts)
   useEffect(() => {
@@ -200,26 +216,37 @@ const CallOverlay = ({
     pc.onicecandidate = (event) => {
       if (event.candidate) {
         socket.emit('ice_candidate', {
-          to: otherUserId,
+          to: otherUser.id || otherUser._id,
           candidate: event.candidate,
-          from: user.id
+          from: user.id || user._id
         });
       }
     };
 
     pc.ontrack = (event) => {
-      console.log("Received remote audio track");
-      if (remoteAudioRef.current) {
+      console.log("Received remote track:", event.track.kind);
+      const targetRef = remoteAudioRef;
+      
+      if (targetRef.current) {
         if (event.streams && event.streams[0]) {
-          remoteAudioRef.current.srcObject = event.streams[0];
+          targetRef.current.srcObject = event.streams[0];
         } else {
-          let inboundStream = new MediaStream([event.track]);
-          remoteAudioRef.current.srcObject = inboundStream;
+          let inboundStream = targetRef.current.srcObject || new MediaStream();
+          inboundStream.addTrack(event.track);
+          targetRef.current.srcObject = inboundStream;
         }
-        remoteAudioRef.current.play().catch(err => {
-          console.error("Audio auto-play failed:", err);
+        targetRef.current.play().catch(err => {
+          console.error("Media auto-play failed:", err);
           setAudioFailed(true);
         });
+      }
+    };
+
+    pc.oniceconnectionstatechange = () => {
+      console.log("ICE Connection State:", pc.iceConnectionState);
+      if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'closed') {
+        console.log("WebRTC connection lost. Hanging up.");
+        onHangUp();
       }
     };
 
@@ -234,11 +261,19 @@ const CallOverlay = ({
           noiseSuppression: { ideal: true },
           autoGainControl: { ideal: true }
         }, 
-        video: false 
+        video: callType === 'video' 
       });
+      if (!isMountedRef.current) {
+        stream.getTracks().forEach(track => track.stop());
+        return;
+      }
       localStreamRef.current = stream;
+      if (localVideoRef.current && callType === 'video') {
+        localVideoRef.current.srcObject = stream;
+        localVideoRef.current.play().catch(e => console.error("Local video play failed:", e));
+      }
 
-      const pc = createPeerConnection(otherUser.id);
+      const pc = createPeerConnection(otherUser.id || otherUser._id);
       peerConnectionRef.current = pc;
 
       stream.getTracks().forEach(track => pc.addTrack(track, stream));
@@ -246,12 +281,13 @@ const CallOverlay = ({
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
 
-      console.log("Emitting call_user to", otherUser.id);
+      console.log("Emitting call_user to", otherUser.id || otherUser._id);
       socket.emit('call_user', {
-        userToCall: otherUser.id,
+        userToCall: otherUser.id || otherUser._id,
         signalData: offer,
-        from: user.id,
-        name: user.username
+        from: user.id || user._id,
+        name: user.username,
+        callType: callType
       });
     } catch (err) {
       console.error("Failed to setup WebRTC as caller:", err);
@@ -268,9 +304,17 @@ const CallOverlay = ({
           noiseSuppression: { ideal: true },
           autoGainControl: { ideal: true }
         }, 
-        video: false 
+        video: callType === 'video' 
       });
+      if (!isMountedRef.current) {
+        stream.getTracks().forEach(track => track.stop());
+        return;
+      }
       localStreamRef.current = stream;
+      if (localVideoRef.current && callType === 'video') {
+        localVideoRef.current.srcObject = stream;
+        localVideoRef.current.play().catch(e => console.error("Local video play failed:", e));
+      }
 
       const pc = createPeerConnection(otherUser.id);
       peerConnectionRef.current = pc;
@@ -290,9 +334,9 @@ const CallOverlay = ({
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
 
-      console.log("Emitting answer_call to", otherUser.id);
+      console.log("Emitting answer_call to", otherUser.id || otherUser._id);
       socket.emit('answer_call', {
-        to: otherUser.id,
+        to: otherUser.id || otherUser._id,
         signal: answer
       });
     } catch (err) {
@@ -304,6 +348,11 @@ const CallOverlay = ({
 
   const cleanupWebRTC = () => {
     stopTone();
+    // Explicitly notify other peer that we are disconnecting
+    if (socket && otherUser && (otherUser.id || otherUser._id)) {
+      socket.emit('end_call', { to: otherUser.id || otherUser._id });
+    }
+    
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach(track => track.stop());
       localStreamRef.current = null;
@@ -314,6 +363,9 @@ const CallOverlay = ({
     }
     if (remoteAudioRef.current) {
       remoteAudioRef.current.srcObject = null;
+    }
+    if (localVideoRef.current) {
+      localVideoRef.current.srcObject = null;
     }
     isRemoteDescriptionSet.current = false;
     iceCandidateQueue.current = [];
@@ -326,19 +378,21 @@ const CallOverlay = ({
       caller_id: otherUser.id,
       callee_id: user.id,
       status: 'declined',
-      duration_seconds: 0
+      duration_seconds: 0,
+      callType: callType
     });
     onDeclineCall();
   };
 
   const handleHangUp = () => {
-    socket.emit('end_call', { to: otherUser.id });
+    socket.emit('end_call', { to: otherUser.id || otherUser._id });
     if (role === 'caller') {
       socket.emit('save_call_history', {
-        caller_id: user.id,
-        callee_id: otherUser.id,
+        caller_id: user.id || user._id,
+        callee_id: otherUser.id || otherUser._id,
         status: callState === 'connected' ? 'completed' : 'missed',
-        duration_seconds: duration
+        duration_seconds: duration,
+        callType: callType
       });
     } else if (role === 'callee' && callState === 'connected') {
       // Both could try to save, but let's let caller save it to avoid duplicates
@@ -353,6 +407,17 @@ const CallOverlay = ({
         track.enabled = !track.enabled;
       });
       setIsMuted(!isMuted);
+    }
+  };
+
+  const toggleVideo = () => {
+    if (localStreamRef.current) {
+      const tracks = localStreamRef.current.getVideoTracks();
+      if (tracks.length > 0) {
+        tracks.forEach(track => {
+          track.enabled = !track.enabled;
+        });
+      }
     }
   };
 
@@ -386,19 +451,37 @@ const CallOverlay = ({
   };
 
   return (
-    <div className="call-overlay">
-      <audio ref={remoteAudioRef} autoPlay playsInline />
-      <div className="call-card">
-        <div className="call-avatar-container">
-          <div className={`call-avatar ${callState === 'outgoing' || callState === 'incoming' ? 'pulsing' : ''}`}>
-            🗣️
-          </div>
+    <div className={`call-overlay ${callType === 'video' ? 'video-mode' : ''}`}>
+      {callType === 'video' ? (
+        <div className="video-container" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', background: '#000', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', zIndex: -1 }}>
+          <video ref={remoteAudioRef} autoPlay playsInline style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+          <video 
+            ref={localVideoRef} 
+            autoPlay 
+            playsInline 
+            muted 
+            style={{ position: 'absolute', bottom: '100px', right: '20px', width: '120px', height: '160px', objectFit: 'cover', borderRadius: '8px', border: '2px solid white' }} 
+          />
         </div>
+      ) : (
+        <audio ref={remoteAudioRef} autoPlay playsInline />
+      )}
+      
+      <div className={`call-card ${callType === 'video' && callState === 'connected' ? 'video-controls' : ''}`} style={callType === 'video' && callState === 'connected' ? { position: 'absolute', bottom: '20px', background: 'rgba(0,0,0,0.5)', border: 'none', color: 'white' } : {}}>
+        {(!callType || callType !== 'video' || callState !== 'connected') && (
+          <div className="call-avatar-container">
+            <div className={`call-avatar ${callState === 'outgoing' || callState === 'incoming' ? 'pulsing' : ''}`}>
+              🗣️
+            </div>
+          </div>
+        )}
 
-        <h3 className="call-user-name">{otherUser?.username || 'User'}</h3>
-        <p className="call-status">
+        {(!callType || callType !== 'video' || callState !== 'connected') && (
+          <h3 className="call-user-name">{otherUser?.username || 'User'}</h3>
+        )}
+        <p className="call-status" style={callType === 'video' && callState === 'connected' ? { color: 'white' } : {}}>
           {callState === 'outgoing' && 'Calling...'}
-          {callState === 'incoming' && 'Incoming Call...'}
+          {callState === 'incoming' && `Incoming ${callType === 'video' ? 'Video' : ''} Call...`}
           {callState === 'connected' && `In Call (${formatTime(duration)})`}
         </p>
 
@@ -430,9 +513,16 @@ const CallOverlay = ({
                   <button className={`call-btn mute ${isMuted ? 'muted' : ''}`} onClick={toggleMute} title={isMuted ? "Unmute" : "Mute"}>
                     {isMuted ? <MicOff size={24} /> : <Mic size={24} />}
                   </button>
-                  <button className={`call-btn mute ${isSpeakerOn ? 'active' : ''}`} onClick={toggleSpeaker} title={isSpeakerOn ? "Speaker On" : "Speaker Off"}>
-                    {isSpeakerOn ? <Volume2 size={24} /> : <VolumeX size={24} />}
-                  </button>
+                  {callType === 'video' && (
+                    <button className="call-btn mute" onClick={toggleVideo} title="Toggle Camera">
+                      <Video size={24} />
+                    </button>
+                  )}
+                  {callType !== 'video' && (
+                    <button className={`call-btn mute ${isSpeakerOn ? 'active' : ''}`} onClick={toggleSpeaker} title={isSpeakerOn ? "Speaker On" : "Speaker Off"}>
+                      {isSpeakerOn ? <Volume2 size={24} /> : <VolumeX size={24} />}
+                    </button>
+                  )}
                 </>
               )}
               <button className="call-btn decline" onClick={handleHangUp} title="End Call">

@@ -1,28 +1,108 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
-import { useAuth } from '../context/AuthContext';
 import ProfileEditor from './ProfileEditor';
 import ProfileViewer from './ProfileViewer';
+import Avatar from './Avatar';
+import CreateGroupModal from './CreateGroupModal';
+import StoryViewsModal from './StoryViewsModal';
+import StoryViewerModal from './StoryViewerModal';
+import { useAuth } from '../context/AuthContext';
+import { useLanguage } from '../context/LanguageContext';
 
-const UserSidebar = ({ activeChat, setActiveChat, users, onlineUsers = new Set(), mobileSidebarOpen = true, socket, isSearchingStranger, setIsSearchingStranger }) => {
-  const { user, token } = useAuth();
-  const [tab, setTab] = useState('chats'); // 'chats', 'requests', 'discover'
-  const [showEditor, setShowEditor] = useState(false);
+const UserSidebar = ({ activeChat, setActiveChat, users, onlineUsers = new Set(), mobileSidebarOpen = true, socket, isSearchingStranger, setIsSearchingStranger, myGroups, setMyGroups, unreadCounts = {} }) => {
+  const { user, token, setUser } = useAuth();
+  const { t } = useLanguage();
+  const [activeTab, setActiveTab] = useState('chats'); // 'chats', 'friends', 'requests', 'groups', 'stories'
+  const [showProfileEditor, setShowProfileEditor] = useState(false);
   const [viewingProfile, setViewingProfile] = useState(null);
+  const [showCreateGroup, setShowCreateGroup] = useState(false);
+  const [showStoryViews, setShowStoryViews] = useState(false);
+  const [viewingStoryUrl, setViewingStoryUrl] = useState(null);
   const [search, setSearch] = useState('');
+  const fileInputRef = useRef(null);
+  const [uploadingStory, setUploadingStory] = useState(false);
 
   const friends = user?.friends || [];
-  const friendRequests = user?.friendRequests || [];
+  const [friendRequests, setFriendRequests] = useState(user?.friendRequests || []);
+
+  useEffect(() => {
+    setFriendRequests(user?.friendRequests || []);
+  }, [user?.friendRequests]);
 
   const handleFriendAction = async (action, targetId) => {
     try {
       await axios.post(`/api/users/${action}/${targetId}`, {}, {
         headers: { 'x-auth-token': token }
       });
-      window.location.reload();
+      if (action === 'friend-request') {
+        socket.emit('send_friend_request', { senderId: user.id || user._id, targetId });
+        alert("Friend request sent!");
+      } else {
+        window.location.reload();
+      }
     } catch (err) {
       console.error(err);
       alert(err.response?.data?.msg || 'Error performing action');
+    }
+  };
+
+  const handleStoryUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    
+    setUploadingStory(true);
+    const formData = new FormData();
+    formData.append('media', file);
+    formData.append('type', 'status');
+
+    try {
+      const res = await axios.post('/api/media/upload-profile-media', formData, {
+        headers: { 
+          'x-auth-token': token,
+          'Content-Type': 'multipart/form-data'
+        }
+      });
+      if (setUser && res.data?.url) {
+        const updatedUser = { ...user, statusVideoUrl: res.data.url, story_views: [] };
+        setUser(updatedUser);
+        localStorage.setItem('user', JSON.stringify(updatedUser));
+      }
+      alert('Story uploaded successfully!');
+    } catch (err) {
+      console.error(err);
+      alert(err.response?.data?.msg || 'Upload failed');
+    } finally {
+      setUploadingStory(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const handleDeleteStory = async () => {
+    if (!window.confirm("Are you sure you want to delete your story?")) return;
+    try {
+      await axios.delete('/api/media/story', {
+        headers: { 'x-auth-token': token }
+      });
+      if (setUser) {
+        const updatedUser = { ...user, statusVideoUrl: null, story_views: [] };
+        setUser(updatedUser);
+        localStorage.setItem('user', JSON.stringify(updatedUser));
+      }
+      setViewingStoryUrl(null);
+      alert("Story deleted successfully!");
+    } catch (err) {
+      console.error('Delete Story Error:', err);
+      alert(err.response?.data?.msg || 'Failed to delete story');
+    }
+  };
+
+  const handleRecordView = async (targetUserId) => {
+    try {
+      await axios.post(`/api/users/story-view/${targetUserId}`, {}, {
+        headers: { 'x-auth-token': token }
+      });
+    } catch (err) {
+      console.error('Error recording view:', err);
     }
   };
 
@@ -30,22 +110,15 @@ const UserSidebar = ({ activeChat, setActiveChat, users, onlineUsers = new Set()
     u.username.toLowerCase().includes(search.toLowerCase())
   );
 
-  const isGuest = (u) => u?.email?.endsWith('@guest.local');
-
-  const filteredUsers = users.filter(u => {
-    if (!u.username.toLowerCase().includes(search.toLowerCase())) return false;
-    if (isGuest(u) && !onlineUsers.has(u.id || u._id)) return false;
-    return true;
+  const searchedUsers = users.filter(u => {
+    if (!search) return false;
+    const s = search.toLowerCase();
+    if (friends.some(f => (f.id || f._id) === (u.id || u._id))) return false;
+    if (friendRequests.some(r => (r.id || r._id) === (u.id || u._id))) return false;
+    return (u.id && u.id.toLowerCase().includes(s)) || 
+           (u.email && u.email.toLowerCase().includes(s)) ||
+           (u.username && u.username.toLowerCase().includes(s));
   });
-
-  // Helper: get initials from username
-  const getInitials = (name) => name ? name[0].toUpperCase() : '?';
-
-  // Helper: unique color per user based on name
-  const getAvatarStyle = (name) => {
-    const hue = name ? (name.charCodeAt(0) * 37 + name.length * 13) % 360 : 200;
-    return { background: `linear-gradient(135deg, hsl(${hue}, 65%, 55%), hsl(${(hue + 60) % 360}, 65%, 45%))` };
-  };
 
   const handleFindStranger = () => {
     if (!user) {
@@ -71,7 +144,7 @@ const UserSidebar = ({ activeChat, setActiveChat, users, onlineUsers = new Set()
           <input
             className="sidebar-search-input"
             type="text"
-            placeholder="Search or start new chat"
+            placeholder={t('search_placeholder')}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
@@ -81,17 +154,26 @@ const UserSidebar = ({ activeChat, setActiveChat, users, onlineUsers = new Set()
       {/* Tabs */}
       <div className="sidebar-tabs">
         <button
-          className={`sidebar-tab-btn ${tab === 'chats' ? 'active' : ''}`}
-          onClick={() => setTab('chats')}
+          className={`sidebar-tab-btn ${activeTab === 'chats' ? 'active' : ''}`}
+          onClick={() => setActiveTab('chats')}
         >
-          💬 Chats
+          {t('chats')}
+        </button>
+        <button className={`sidebar-tab-btn ${activeTab === 'stories' ? 'active' : ''}`} onClick={() => setActiveTab('stories')}>
+          {t('stories')}
+        </button>
+        <button className={`sidebar-tab-btn ${activeTab === 'friends' ? 'active' : ''}`} onClick={() => setActiveTab('friends')}>
+          {t('friends')}
+        </button>
+        <button className={`sidebar-tab-btn ${activeTab === 'groups' ? 'active' : ''}`} onClick={() => setActiveTab('groups')}>
+          {t('groups')}
         </button>
         <button
-          className={`sidebar-tab-btn ${tab === 'requests' ? 'active' : ''}`}
-          onClick={() => setTab('requests')}
+          className={`sidebar-tab-btn ${activeTab === 'requests' ? 'active' : ''}`}
+          onClick={() => setActiveTab('requests')}
           style={{ position: 'relative' }}
         >
-          📩 Requests
+          {t('requests')}
           {friendRequests.length > 0 && (
             <span style={{
               position: 'absolute', top: '6px', right: '6px',
@@ -102,44 +184,13 @@ const UserSidebar = ({ activeChat, setActiveChat, users, onlineUsers = new Set()
             }}>{friendRequests.length}</span>
           )}
         </button>
-        <button
-          className={`sidebar-tab-btn ${tab === 'discover' ? 'active' : ''}`}
-          onClick={() => setTab('discover')}
-        >
-          🌐 All
-        </button>
       </div>
 
       <div className="sidebar-list">
 
         {/* ========== CHATS TAB ========== */}
-        {tab === 'chats' && (
+        {activeTab === 'chats' && (
           <>
-            {/* Edit Profile Button */}
-            {user && (
-              <button className="sidebar-profile-btn" onClick={() => setShowEditor(true)}>
-                ✏️ Edit Status & Profile Song
-              </button>
-            )}
-
-            {/* Public Chat */}
-            <div className="sidebar-section-label">Public</div>
-            <div
-              className={`sidebar-item ${activeChat === 'home' ? 'active' : ''}`}
-              onClick={() => setActiveChat('home')}
-            >
-              <div className="avatar avatar-public">🌐</div>
-              <div className="sidebar-item-meta">
-                <div className="sidebar-item-top">
-                  <span className="sidebar-item-name">Random Chat</span>
-                  <span className="sidebar-item-time">Public</span>
-                </div>
-                <div className="sidebar-item-status">
-                  Open global conversation
-                </div>
-              </div>
-            </div>
-
             {/* Stranger Chat Matchmaking */}
             {user && (
               <div 
@@ -171,7 +222,7 @@ const UserSidebar = ({ activeChat, setActiveChat, users, onlineUsers = new Set()
                 {filteredFriends.length === 0 && (
                   <div className="no-users">
                     {friends.length === 0
-                      ? "No friends yet — find them in the 'All' tab"
+                      ? "No friends yet — add them from search!"
                       : 'No results for "' + search + '"'}
                   </div>
                 )}
@@ -183,17 +234,27 @@ const UserSidebar = ({ activeChat, setActiveChat, users, onlineUsers = new Set()
                       className={`sidebar-item ${activeChat === (u.id || u._id) ? 'active' : ''}`}
                       onClick={() => setActiveChat(u.id || u._id)}
                     >
-                      <div className="avatar" style={{ position: 'relative', ...getAvatarStyle(u.username) }}>
-                        {getInitials(u.username)}
+                      <div style={{ position: 'relative' }}>
+                        <Avatar userId={u.id || u._id} username={u.username} size={44} />
                         {isOnline
                           ? <span className="online-dot" />
                           : <span className="offline-dot" />
                         }
                       </div>
                       <div className="sidebar-item-meta">
-                        <div className="sidebar-item-top">
-                          <span className="sidebar-item-name">{u.username}</span>
-                          {u.profileSongUrl && <span title="Has profile song" style={{ fontSize: '0.7rem' }}>🎵</span>}
+                        <div className="sidebar-item-top" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+                          <div>
+                            <span className="sidebar-item-name">{u.username}</span>
+                            {u.profileSongUrl && <span title="Has profile song" style={{ fontSize: '0.7rem', marginLeft: 4 }}>🎵</span>}
+                          </div>
+                          {unreadCounts[u.id || u._id] > 0 && (
+                            <div style={{
+                              background: '#25d366', color: 'white', borderRadius: '10px',
+                              padding: '2px 6px', fontSize: '0.7rem', fontWeight: 'bold'
+                            }}>
+                              {unreadCounts[u.id || u._id] > 9 ? '9+' : unreadCounts[u.id || u._id]}
+                            </div>
+                          )}
                         </div>
                         <div className="sidebar-item-status">
                           <span className={isOnline ? 'status-online' : ''}>
@@ -213,11 +274,85 @@ const UserSidebar = ({ activeChat, setActiveChat, users, onlineUsers = new Set()
                 Login to see your private messages and friends.
               </div>
             )}
+
+            {user && search && searchedUsers.length > 0 && (
+              <>
+                <div className="sidebar-section-label" style={{ marginTop: '20px' }}>Global Search Results</div>
+                {searchedUsers.map(u => (
+                  <div key={u.id || u._id} className="sidebar-item" style={{ flexDirection: 'column', alignItems: 'flex-start' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, width: '100%' }}>
+                      <div style={{ cursor: 'pointer' }} onClick={() => setViewingProfile(u)}>
+                        <Avatar userId={u.id || u._id} username={u.username} size={44} />
+                      </div>
+                      <div className="sidebar-item-meta" style={{ flex: 1 }}>
+                        <div className="sidebar-item-name">{u.username}</div>
+                        <div className="sidebar-item-status" style={{ fontSize: '0.75rem' }}>ID: {u.id || u._id}</div>
+                      </div>
+                      <button 
+                        className="btn-primary" 
+                        style={{ padding: '6px 12px', fontSize: '0.8rem', borderRadius: '16px' }}
+                        onClick={(e) => { e.stopPropagation(); handleFriendAction('friend-request', u.id || u._id); }}
+                      >
+                        + Add
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </>
+            )}
+          </>
+        )}
+
+        {/* ========== GROUPS TAB ========== */}
+        {activeTab === 'groups' && (
+          <>
+            <button 
+              className="btn-primary" 
+              style={{ width: '100%', marginBottom: '15px' }}
+              onClick={() => setShowCreateGroup(true)}
+            >
+              + Create New Group
+            </button>
+            <div className="users-list">
+              {myGroups.length === 0 ? (
+                <div style={{ textAlign: 'center', color: '#888', marginTop: '20px' }}>
+                  You are not in any groups yet.
+                </div>
+              ) : (
+                myGroups.map(group => (
+                  <div 
+                    key={group.id} 
+                    className={`sidebar-item ${activeChat === group.id ? 'active' : ''}`}
+                    onClick={() => setActiveChat(group.id)}
+                  >
+                    <div style={{ position: 'relative' }}>
+                      <div className="avatar avatar-public" style={{ width: 44, height: 44, fontSize: '1.2rem', background: '#e91e63' }}>
+                        👥
+                      </div>
+                    </div>
+                    <div className="sidebar-item-meta" style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+                        <div className="sidebar-item-name">{group.name}</div>
+                        {unreadCounts[group.id] > 0 && (
+                          <div style={{
+                            background: '#25d366', color: 'white', borderRadius: '10px',
+                            padding: '2px 6px', fontSize: '0.7rem', fontWeight: 'bold'
+                          }}>
+                            {unreadCounts[group.id] > 9 ? '9+' : unreadCounts[group.id]}
+                          </div>
+                        )}
+                      </div>
+                      <div className="sidebar-item-status">Group Chat</div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
           </>
         )}
 
         {/* ========== REQUESTS TAB ========== */}
-        {tab === 'requests' && (
+        {activeTab === 'requests' && (
           <>
             <div className="sidebar-section-label">Pending Friend Requests</div>
             {friendRequests.length === 0 && (
@@ -226,12 +361,8 @@ const UserSidebar = ({ activeChat, setActiveChat, users, onlineUsers = new Set()
             {friendRequests.map(u => (
               <div key={u.id || u._id} className="sidebar-item" style={{ flexDirection: 'column', alignItems: 'flex-start' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12, width: '100%' }}>
-                  <div
-                    className="avatar"
-                    style={{ cursor: 'pointer' }}
-                    onClick={() => setViewingProfile(u)}
-                  >
-                    {getInitials(u.username)}
+                  <div style={{ cursor: 'pointer' }} onClick={() => setViewingProfile(u)}>
+                    <Avatar userId={u.id || u._id} username={u.username} size={44} />
                   </div>
                   <div className="sidebar-item-meta">
                     <div className="sidebar-item-name">{u.username}</div>
@@ -247,54 +378,183 @@ const UserSidebar = ({ activeChat, setActiveChat, users, onlineUsers = new Set()
           </>
         )}
 
-        {/* ========== DISCOVER TAB ========== */}
-        {tab === 'discover' && (
+        {/* ========== STORIES TAB ========== */}
+        {activeTab === 'stories' && (
           <>
-            <div className="sidebar-section-label">All Users</div>
-            {filteredUsers.length === 0 && (
-              <div className="no-users">No users found</div>
+            <div className="sidebar-section-label">{t('my_story')}</div>
+            {user ? (
+              <div 
+                className="sidebar-item" 
+                onClick={() => !uploadingStory && fileInputRef.current?.click()}
+                style={{ background: 'rgba(255,255,255,0.05)' }}
+              >
+                <div style={{ position: 'relative' }}>
+                  <Avatar userId={user.id || user._id} username={user.username} size={44} />
+                  <span style={{
+                    position: 'absolute', bottom: -2, right: -2,
+                    background: '#25d366', color: 'white', borderRadius: '50%',
+                    width: '18px', height: '18px', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: '14px', fontWeight: 'bold', border: '2px solid var(--sidebar-bg)'
+                  }}>+</span>
+                </div>
+                <div className="sidebar-item-meta" style={{ flex: 1 }}>
+                  <div className="sidebar-item-name">{uploadingStory ? 'Uploading...' : 'My Story'}</div>
+                  <div className="sidebar-item-status">
+                    {uploadingStory ? 'Please wait...' : 'Tap to add story (Max 1 min)'}
+                  </div>
+                  {user.statusVideoUrl && !uploadingStory && (
+                    <div style={{ marginTop: '6px', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                      <span style={{ color: '#25d366', cursor: 'pointer', fontSize: '0.85rem', fontWeight: '500' }} onClick={(e) => { e.stopPropagation(); setViewingStoryUrl(user.statusVideoUrl); }}>▶ View My Story</span>
+                      <button onClick={(e) => { e.stopPropagation(); setShowStoryViews(true); }} style={{ background: 'none', border: 'none', color: '#888', cursor: 'pointer', fontSize: '1.1rem', padding: '0 2px' }} title="Viewers">👁️</button>
+                      <button 
+                        onClick={(e) => { e.stopPropagation(); handleDeleteStory(); }} 
+                        style={{ 
+                          background: 'rgba(239, 68, 68, 0.15)', 
+                          border: '1px solid rgba(239, 68, 68, 0.35)', 
+                          color: '#ef4444', 
+                          borderRadius: '4px',
+                          padding: '2px 7px',
+                          cursor: 'pointer', 
+                          fontSize: '0.78rem',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '3px',
+                          fontWeight: '500'
+                        }} 
+                        title="Delete My Story"
+                      >
+                        🗑️ Delete
+                      </button>
+                    </div>
+                  )}
+                </div>
+                <input 
+                  type="file" 
+                  ref={fileInputRef} 
+                  accept="video/*" 
+                  style={{ display: 'none' }} 
+                  onChange={handleStoryUpload}
+                />
+              </div>
+            ) : (
+              <div className="no-users">Login to post a story</div>
             )}
-            {filteredUsers.map(u => {
-              const isFriend = friends.some(f => (f.id || f._id) === (u.id || u._id));
-              const isOnline = onlineUsers.has(u.id || u._id);
-              return (
-                <div key={u.id || u._id} className="sidebar-item">
-                  <div
-                    className="avatar"
-                    style={{ cursor: 'pointer', position: 'relative' }}
-                    onClick={() => setViewingProfile(u)}
-                    title="View Profile"
-                  >
-                    {getInitials(u.username)}
-                    {isOnline ? <span className="online-dot" /> : <span className="offline-dot" />}
+            
+            <div className="sidebar-section-label" style={{ marginTop: '20px' }}>{t('friends_stories')}</div>
+            {filteredFriends.filter(f => f.statusVideoUrl).length === 0 ? (
+              <div className="no-users">{t('no_recent_stories')}</div>
+            ) : (
+              filteredFriends.filter(f => f.statusVideoUrl).map(u => (
+                <div 
+                  key={u.id || u._id} 
+                  className="sidebar-item" 
+                  onClick={() => {
+                    handleRecordView(u.id || u._id);
+                    setViewingStoryUrl(u.statusVideoUrl);
+                  }}
+                  style={{ cursor: 'pointer' }}
+                >
+                  <div style={{ position: 'relative', padding: '2px', border: '2px solid #25d366', borderRadius: '50%' }}>
+                    <Avatar userId={u.id || u._id} username={u.username} size={40} />
                   </div>
                   <div className="sidebar-item-meta">
-                    <div className="sidebar-item-top">
-                      <span className="sidebar-item-name">{u.username}</span>
-                      {isFriend
-                        ? <span className="friend-badge">Friend ✓</span>
-                        : (!isGuest(u) && !isGuest(user) && (
-                            <button
-                              className="add-friend-btn"
-                              onClick={(e) => { e.stopPropagation(); handleFriendAction('friend-request', u.id || u._id); }}
-                            >+ Add</button>
-                          ))
-                      }
-                    </div>
+                    <div className="sidebar-item-name">{u.username}</div>
                     <div className="sidebar-item-status">
-                      <span className={isOnline ? 'status-online' : ''}>{isOnline ? 'Online' : 'Offline'}</span>
+                      <span style={{ color: '#25d366' }}>▶ View Story</span>
                     </div>
                   </div>
                 </div>
-              );
-            })}
+              ))
+            )}
           </>
         )}
 
+        {/* ========== FRIENDS TAB ========== */}
+        {activeTab === 'friends' && (
+          <>
+            <div className="sidebar-section-label">{t('my_friends')}</div>
+            {filteredFriends.length === 0 && (
+              <div className="no-users">{t('no_friends_found')}</div>
+            )}
+            {[...filteredFriends]
+              .sort((a, b) => {
+                const aOnline = onlineUsers.has(a.id || a._id);
+                const bOnline = onlineUsers.has(b.id || b._id);
+                if (aOnline && !bOnline) return -1;
+                if (!aOnline && bOnline) return 1;
+                return 0;
+              })
+              .map(u => {
+                const isOnline = onlineUsers.has(u.id || u._id);
+                return (
+                  <div
+                    key={u.id || u._id}
+                    className={`sidebar-item ${activeChat === (u.id || u._id) ? 'active' : ''}`}
+                    onClick={() => setActiveChat(u.id || u._id)}
+                  >
+                    <div style={{ position: 'relative' }}>
+                      <Avatar userId={u.id || u._id} username={u.username} size={44} />
+                      {isOnline
+                        ? <span className="online-dot" />
+                        : <span className="offline-dot" />
+                      }
+                    </div>
+                    <div className="sidebar-item-meta">
+                      <div className="sidebar-item-top" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+                        <div>
+                          <span className="sidebar-item-name">{u.username}</span>
+                          {u.profileSongUrl && <span title="Has profile song" style={{ fontSize: '0.7rem', marginLeft: 4 }}>🎵</span>}
+                        </div>
+                        {unreadCounts[u.id || u._id] > 0 && (
+                          <div style={{
+                            background: '#25d366', color: 'white', borderRadius: '10px',
+                            padding: '2px 6px', fontSize: '0.7rem', fontWeight: 'bold'
+                          }}>
+                            {unreadCounts[u.id || u._id] > 9 ? '9+' : unreadCounts[u.id || u._id]}
+                          </div>
+                        )}
+                      </div>
+                      <div className="sidebar-item-status">
+                        <span className={isOnline ? 'status-online' : ''}>
+                          {isOnline ? 'Online' : 'Offline'}
+                        </span>
+                        {u.statusVideoUrl && <span>📹 Status</span>}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+          </>
+        )}
       </div>
 
-      {showEditor && <ProfileEditor onClose={() => setShowEditor(false)} />}
-      {viewingProfile && <ProfileViewer userProfile={viewingProfile} onClose={() => setViewingProfile(null)} />}
+      {viewingProfile && (
+        <ProfileViewer userProfile={viewingProfile} onClose={() => setViewingProfile(null)} />
+      )}
+
+      {showCreateGroup && (
+        <CreateGroupModal 
+          onClose={() => setShowCreateGroup(false)} 
+          onGroupCreated={(newGroup) => {
+            setMyGroups(prev => [...prev, newGroup]);
+            setActiveChat(newGroup.id);
+            setActiveTab('chats');
+          }}
+        />
+      )}
+
+      {showStoryViews && (
+        <StoryViewsModal onClose={() => setShowStoryViews(false)} />
+      )}
+
+      {viewingStoryUrl && (
+        <StoryViewerModal 
+          videoUrl={viewingStoryUrl} 
+          isOwn={user && viewingStoryUrl === user.statusVideoUrl}
+          onDelete={handleDeleteStory}
+          onClose={() => setViewingStoryUrl(null)} 
+        />
+      )}
     </div>
   );
 };

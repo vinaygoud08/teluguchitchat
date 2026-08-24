@@ -1,8 +1,9 @@
 import React, { useState, useRef } from 'react';
 import axios from 'axios';
 import { useAuth } from '../context/AuthContext';
-import { Send, Image as ImageIcon, Smile, Phone, Sticker } from 'lucide-react';
+import { Send, Image as ImageIcon, Smile, Sticker } from 'lucide-react';
 import EmojiPicker from 'emoji-picker-react';
+import { encryptMessage } from '../utils/crypto';
 
 const STICKERS = [
   'https://media.giphy.com/media/l4pTfx2qLszoacZRS/giphy.gif',
@@ -13,9 +14,19 @@ const STICKERS = [
   'https://media.giphy.com/media/3o6Zt481isNVuQI1l6/giphy.gif',
   'https://media.giphy.com/media/13CoXDiaCcCoyk/giphy.gif',
   'https://media.giphy.com/media/BzyTuYCmvSORqs1Q/giphy.gif',
+  'https://media.giphy.com/media/26AHONQ79FdWZhAI0/giphy.gif',
+  'https://media.giphy.com/media/VbnUQpnihPSIgIXuZv/giphy.gif',
+  'https://media.giphy.com/media/Ge86XF8AVY1KE/giphy.gif',
+  'https://media.giphy.com/media/ICOgUNjpvO0PC/giphy.gif',
+  'https://media.giphy.com/media/V80llXf734WzK/giphy.gif',
+  'https://media.giphy.com/media/11s7Ke7jcNxCHS/giphy.gif',
+  'https://media.giphy.com/media/l0ExhcMymdL6TrZ84/giphy.gif',
+  'https://media.giphy.com/media/artj92V8o75VPL7AeQ/giphy.gif',
+  'https://media.giphy.com/media/3o72FkiK6GcvpgyaJi/giphy.gif',
+  'https://media.giphy.com/media/QvBoMEcQ7DQXK/giphy.gif'
 ];
 
-const MessageInput = ({ socket, activeChat, onInitiateCall }) => {
+const MessageInput = ({ socket, activeChat, isGroup, onInitiateCall, replyingTo, onClearReply, otherUser }) => {
   const { user, token } = useAuth();
   const [text, setText] = useState('');
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
@@ -28,18 +39,43 @@ const MessageInput = ({ socket, activeChat, onInitiateCall }) => {
     setText('');
   };
 
-  const sendMessage = (content) => {
+  const sendMessage = async (content) => {
+    let messageText = content.text;
+    
+    // Encrypt private messages if otherUser has a public key
+    if (!isGroup && activeChat !== 'home' && otherUser?.public_key && messageText) {
+      try {
+        messageText = await encryptMessage(messageText, otherUser.public_key);
+      } catch (err) {
+        console.error("Encryption failed:", err);
+        alert("Failed to encrypt message. Please try again.");
+        return;
+      }
+    }
+
     const baseData = {
       sender: user ? user.username : `Guest-${Math.floor(Math.random() * 1000)}`,
       timestamp: new Date().toISOString(),
-      ...content
+      ...(replyingTo && { reply_to: replyingTo }),
+      ...content,
+      text: messageText
     };
+
+    if (onClearReply) onClearReply();
 
     if (activeChat === 'home') {
       socket.emit('send_message', baseData);
+    } else if (isGroup) {
+      if (!user) return; // Guests can't send group messages
+      socket.emit('send_group_message', {
+        ...baseData,
+        room: activeChat,
+        senderId: user.id
+      });
     } else {
       if (!user) return; // Guests can't send private messages
-      const room = [user.id, activeChat].sort().join('_');
+      const isStranger = activeChat.startsWith('stranger_');
+      const room = isStranger ? activeChat : [user.id, activeChat].sort().join('_');
       socket.emit('send_private_message', {
         ...baseData,
         room,
@@ -62,6 +98,8 @@ const MessageInput = ({ socket, activeChat, onInitiateCall }) => {
     const file = e.target.files[0];
     if (!file) return;
 
+    const isViewOnce = window.confirm("Send this image as 'View Once'?");
+
     const formData = new FormData();
     formData.append('image', file);
 
@@ -72,7 +110,7 @@ const MessageInput = ({ socket, activeChat, onInitiateCall }) => {
           'x-auth-token': token
         }
       });
-      sendMessage({ imageUrl: res.data.imageUrl });
+      sendMessage({ imageUrl: res.data.imageUrl, viewOnce: isViewOnce });
     } catch (err) {
       console.error('Upload failed', err);
       alert('Failed to upload image.');
@@ -109,11 +147,6 @@ const MessageInput = ({ socket, activeChat, onInitiateCall }) => {
     setShowStickerPicker(false);
   };
 
-  const handleCallClick = () => {
-    if (!user || activeChat === 'home') return;
-    onInitiateCall();
-  };
-
   const isGuestInPrivate = !user && activeChat !== 'home';
 
   return (
@@ -138,6 +171,8 @@ const MessageInput = ({ socket, activeChat, onInitiateCall }) => {
         onChange={handleFileChange}
       />
       
+
+
       <button 
         className="action-btn" 
         disabled={!user} 
@@ -165,14 +200,7 @@ const MessageInput = ({ socket, activeChat, onInitiateCall }) => {
         <Sticker size={20} />
       </button>
 
-      <button 
-        className="action-btn" 
-        disabled={!user || activeChat === 'home'} 
-        onClick={handleCallClick}
-        data-tooltip={!user ? "Login to make calls" : (activeChat === 'home' ? "Select a user to call" : "Voice Call")}
-      >
-        <Phone size={20} />
-      </button>
+
 
       <button className="send-btn" onClick={handleSendText} disabled={isGuestInPrivate}>
         <Send size={18} />
@@ -193,6 +221,7 @@ const MessageInput = ({ socket, activeChat, onInitiateCall }) => {
           </div>
         </div>
       )}
+
     </div>
   );
 };

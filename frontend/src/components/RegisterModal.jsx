@@ -12,6 +12,7 @@ const RegisterModal = ({ onClose }) => {
   const [dobMonth, setDobMonth] = useState('');
   const [dobYear, setDobYear] = useState('');
   const [gender, setGender] = useState('Other');
+  const [country, setCountry] = useState('');
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
@@ -41,8 +42,8 @@ const RegisterModal = ({ onClose }) => {
       return;
     }
 
-    // Calculate age from dob
-    const birthDate = new Date(`${dobYear}-${dobMonth.padStart(2, '0')}-${dobDay.padStart(2, '0')}`);
+    const birthDateStr = `${dobYear}-${dobMonth.padStart(2, '0')}-${dobDay.padStart(2, '0')}`;
+    const birthDate = new Date(birthDateStr);
     const today = new Date();
     let calculatedAge = today.getFullYear() - birthDate.getFullYear();
     const m = today.getMonth() - birthDate.getMonth();
@@ -56,7 +57,7 @@ const RegisterModal = ({ onClose }) => {
     }
 
     try {
-      const res = await axios.post('/api/auth/register', { username, email, password, age: calculatedAge, gender });
+      const res = await axios.post('/api/auth/register', { username, email, password, age: calculatedAge, gender, birthday: birthDateStr, country });
       setSuccessMsg(res.data.msg);
       setError('');
     } catch (err) {
@@ -165,6 +166,23 @@ const RegisterModal = ({ onClose }) => {
               </div>
             </div>
             <div className="form-group">
+              <label>Country/Region</label>
+              <select 
+                className="form-control" 
+                value={country} 
+                onChange={e => setCountry(e.target.value)}
+                required
+              >
+                <option value="">Select Country</option>
+                <option value="India">India</option>
+                <option value="United States">United States</option>
+                <option value="United Kingdom">United Kingdom</option>
+                <option value="Canada">Canada</option>
+                <option value="Australia">Australia</option>
+                <option value="Other">Other</option>
+              </select>
+            </div>
+            <div className="form-group">
               <label>Password</label>
               <div style={{ position: 'relative' }}>
                 <input 
@@ -205,14 +223,14 @@ const RegisterModal = ({ onClose }) => {
                 style={{ marginTop: '4px' }}
                 required
               />
-              <label htmlFor="termsCheck" style={{ fontSize: '12px', lineHeight: '1.4' }}>
-                I verify that the details provided are correct, that I am 18 years of age or older, and by registering I agree to the Terms and Conditions.
+              <label htmlFor="termsCheck" style={{ fontSize: '13px', lineHeight: '1.4' }}>
+                I am 18+ and agree to the Terms and Conditions.
               </label>
             </div>
             {error && <div className="error-text">{error}</div>}
             <div className="modal-actions">
               <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
-              <button type="submit" className="btn-primary">Register</button>
+              <button type="submit" className="btn-primary">Sign up</button>
             </div>
           </form>
         )}

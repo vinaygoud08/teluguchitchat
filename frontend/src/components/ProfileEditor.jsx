@@ -35,38 +35,50 @@ const ProfileEditor = ({ onClose }) => {
     }
   };
 
+  const handleDeleteStory = async () => {
+    if (!window.confirm("Are you sure you want to delete your status video?")) return;
+    setLoading(true);
+    setError('');
+    try {
+      await axios.delete('/api/media/story', {
+        headers: { 'x-auth-token': token }
+      });
+      window.location.reload();
+    } catch (err) {
+      console.error(err);
+      setError(err.response?.data?.msg || 'Failed to delete status');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="modal-overlay" onClick={onClose} style={{ zIndex: 10000 }}>
       <div className="modal-content" onClick={e => e.stopPropagation()}>
-        <h2 className="modal-title">Edit Profile</h2>
+        <h2 className="modal-title">Upload Status</h2>
         
         {error && <div className="error-text">{error}</div>}
 
-        <div className="form-group" style={{ marginBottom: '20px' }}>
-          <label style={{ fontWeight: 'bold' }}>Profile Song (mp3/wav)</label>
-          <div style={{ fontSize: '0.8rem', color: '#666', marginBottom: '10px' }}>
-            Current: {user?.profileSongUrl ? <a href={user.profileSongUrl} target="_blank" rel="noreferrer">Uploaded</a> : 'None'}
-          </div>
-          <input 
-            type="file" 
-            accept="audio/*" 
-            onChange={e => setSongFile(e.target.files[0])} 
-            className="form-control"
-          />
-          <button 
-            className="btn-primary" 
-            style={{ marginTop: '10px', width: '100%' }}
-            onClick={() => handleUpload(songFile, 'song')}
-            disabled={!songFile || loading}
-          >
-            {loading ? 'Uploading...' : 'Upload Song'}
-          </button>
-        </div>
-
         <div className="form-group">
           <label style={{ fontWeight: 'bold' }}>Status Video (Max 30s, mp4)</label>
-          <div style={{ fontSize: '0.8rem', color: '#666', marginBottom: '10px' }}>
-            Current: {user?.statusVideoUrl ? <a href={user.statusVideoUrl} target="_blank" rel="noreferrer">Uploaded</a> : 'None'}
+          <div style={{ fontSize: '0.8rem', color: '#666', marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <span>Current: {user?.statusVideoUrl ? <a href={user.statusVideoUrl} target="_blank" rel="noreferrer">Uploaded</a> : 'None'}</span>
+            {user?.statusVideoUrl && (
+              <button 
+                onClick={handleDeleteStory}
+                disabled={loading}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: '#ef4444',
+                  cursor: 'pointer',
+                  fontSize: '0.8rem',
+                  textDecoration: 'underline'
+                }}
+              >
+                Delete Story
+              </button>
+            )}
           </div>
           <input 
             type="file" 

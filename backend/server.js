@@ -22,11 +22,16 @@ const io = new Server(server, {
 });
 
 const supabase = require('./supabaseClient');
+
+// Make io accessible in routes
+app.set('io', io);
+
 // Routes
 app.use('/api/users', require('./routes/user'));
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/messages', require('./routes/messages'));
 app.use('/api/media', require('./routes/media'));
+app.use('/api/groups', require('./routes/groups'));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // Socket.io logic
@@ -44,17 +49,31 @@ io.on('connection', (socket) => {
 
   socket.on('send_message', async (data) => {
     try {
+      const msgData = {
+        room: 'home_chat',
+        sender: data.sender,
+        senderId: data.senderId,
+        text: data.text || '',
+        imageUrl: data.imageUrl || null,
+        gifUrl: data.gifUrl || null,
+        stickerUrl: data.stickerUrl || null,
+        fileUrl: data.fileUrl || null,
+        fileType: data.fileType || null
+      };
+
       const { data: savedMsg, error } = await supabase
         .from('messages')
-        .insert([{
-          room: 'home_chat',
-          ...data
-        }])
+        .insert([msgData])
         .select()
         .single();
 
-      if (error) throw error;
-      io.to('home_chat').emit('receive_message', savedMsg);
+      if (error) {
+        console.error('Error saving home message:', error);
+        // Fallback: emit message with temporary id so chat still works
+        io.to('home_chat').emit('receive_message', { ...data, id: Date.now().toString(), timestamp: new Date().toISOString() });
+        return;
+      }
+      io.to('home_chat').emit('receive_message', { ...savedMsg, ...data });
     } catch (err) {
       console.error('Error saving message:', err);
     }
@@ -65,26 +84,109 @@ io.on('connection', (socket) => {
     console.log(`User ${socket.id} joined private room ${room}`);
   });
 
+  socket.on('join_group', (room) => {
+    socket.join(room);
+    console.log(`User ${socket.id} joined group room ${room}`);
+  });
+
   socket.on('send_private_message', async (data) => {
     try {
+      if (data.room && data.room.startsWith('stranger_')) {
+        // Ephemeral chat, don't save to DB
+        io.to(data.room).emit('receive_private_message', data);
+        return;
+      }
+
+      const msgData = {
+        room: data.room,
+        sender: data.sender,
+        senderId: data.senderId,
+        recipientId: data.recipientId,
+        text: data.text || '',
+        imageUrl: data.imageUrl || null,
+        gifUrl: data.gifUrl || null,
+        stickerUrl: data.stickerUrl || null,
+        fileUrl: data.fileUrl || null,
+        fileType: data.fileType || null
+      };
+
       const { data: savedMsg, error } = await supabase
         .from('messages')
-        .insert([{
-          room: data.room,
-          ...data
-        }])
+        .insert([msgData])
         .select()
         .single();
 
-      if (error) throw error;
-      io.to(data.room).emit('receive_private_message', savedMsg);
+      if (error) {
+        console.error('Error saving private message:', error);
+        // Fallback emit so chat stays responsive
+        io.to(data.room).emit('receive_private_message', { ...data, id: Date.now().toString(), timestamp: new Date().toISOString() });
+        return;
+      }
+      
+      // Pass along ephemeral metadata (e.g. viewOnce, reply_to) in the socket event
+      io.to(data.room).emit('receive_private_message', { ...savedMsg, ...data });
     } catch (err) {
       console.error('Error saving private message:', err);
     }
   });
 
+  socket.on('send_group_message', async (data) => {
+    try {
+      const msgData = {
+        room: data.room,
+        sender: data.sender,
+        senderId: data.senderId,
+        text: data.text || '',
+        imageUrl: data.imageUrl || null,
+        gifUrl: data.gifUrl || null,
+        stickerUrl: data.stickerUrl || null,
+        fileUrl: data.fileUrl || null,
+        fileType: data.fileType || null
+      };
+
+      const { data: savedMsg, error } = await supabase
+        .from('messages')
+        .insert([msgData])
+        .select()
+        .single();
+
+      if (error) {
+        console.error('Error saving group message:', error);
+        // Fallback emit so group chat stays responsive
+        io.to(data.room).emit('receive_group_message', { ...data, id: Date.now().toString(), timestamp: new Date().toISOString() });
+        return;
+      }
+      io.to(data.room).emit('receive_group_message', { ...savedMsg, ...data });
+    } catch (err) {
+      console.error('Error saving group message:', err);
+    }
+  });
+
+  socket.on('delete_message', async (data) => {
+    try {
+      if (data.messageId && data.room) {
+        const { error } = await supabase.from('messages').delete().eq('id', data.messageId);
+        io.to(data.room).emit('message_deleted', { messageId: data.messageId });
+      }
+    } catch (err) {
+      console.error('Error deleting message:', err);
+    }
+  });
+
+  socket.on('pin_message', async (data) => {
+    try {
+      if (data.messageId && data.room) {
+        const isPinned = !data.unpin;
+        io.to(data.room).emit('message_pinned', { messageId: data.messageId, isPinned, roomKey: data.room });
+        await supabase.from('messages').update({ is_pinned: isPinned }).eq('id', data.messageId).catch(() => {});
+      }
+    } catch (err) {
+      console.error('Error pinning message:', err);
+    }
+  });
+
   // WebRTC Signaling and Online Status
-  socket.on('join_user', (userId) => {
+  socket.on('join_user', async (userId) => {
     socket.join(userId);
     console.log(`User socket ${socket.id} joined personal room ${userId}`);
     
@@ -92,26 +194,66 @@ io.on('connection', (socket) => {
     onlineUsers.set(socket.id, userId);
     onlineUsersSet.add(userId);
     
-    // Send current online users to this socket
-    socket.emit('online_users', Array.from(onlineUsersSet));
-    
-    // Broadcast to everyone else that this user is online
-    socket.broadcast.emit('user_online', userId);
+    try {
+      // Get friends of the user
+      const { data: friendLinks } = await supabase
+        .from('friends')
+        .select('friend_id')
+        .eq('user_id', userId);
+        
+      const friendIds = friendLinks ? friendLinks.map(link => link.friend_id) : [];
+      
+      // Calculate which friends are online
+      const onlineFriends = friendIds.filter(fId => onlineUsersSet.has(fId));
+      
+      // Send current online *friends* to this socket
+      socket.emit('online_users', onlineFriends);
+      
+      // Notify only online *friends* that this user is online
+      for (const friendId of onlineFriends) {
+        io.to(friendId).emit('user_online', userId);
+      }
+
+      // Join all group rooms the user is part of
+      const { data: groupMembers } = await supabase
+        .from('group_members')
+        .select('group_id')
+        .eq('user_id', userId);
+        
+      if (groupMembers) {
+        groupMembers.forEach(gm => {
+          socket.join(gm.group_id);
+          console.log(`User socket ${socket.id} joined group room ${gm.group_id}`);
+        });
+      }
+    } catch (err) {
+      console.error('Error fetching friends/groups for online status:', err);
+      socket.emit('online_users', []);
+    }
   });
 
   socket.on('call_user', (data) => {
-    io.to(data.userToCall).emit('call_incoming', { signal: data.signalData, from: data.from, name: data.name });
+    console.log(`[call_user] from: ${data.from} to: ${data.userToCall}`);
+    io.to(data.userToCall).emit('call_incoming', { 
+      signal: data.signalData, 
+      from: data.from, 
+      name: data.name,
+      callType: data.callType 
+    });
   });
 
   socket.on('answer_call', (data) => {
+    console.log(`[answer_call] to: ${data.to}`);
     io.to(data.to).emit('call_accepted', data.signal);
   });
 
   socket.on('ice_candidate', (data) => {
+    console.log(`[ice_candidate] from: ${data.from} to: ${data.to}`);
     io.to(data.to).emit('ice_candidate', { candidate: data.candidate, from: data.from });
   });
 
   socket.on('end_call', (data) => {
+    console.log(`[end_call] to: ${data.to}`);
     io.to(data.to).emit('call_ended');
   });
 
@@ -132,6 +274,10 @@ io.on('connection', (socket) => {
         io.to(otherUserId).emit('chat_cleared', { room, chatKey: senderId });
       }
     }
+  });
+
+  socket.on('send_friend_request', (data) => {
+    io.to(data.targetId).emit('receive_friend_request', { from: data.senderId });
   });
 
   // Anonymous Matchmaking
@@ -170,7 +316,7 @@ io.on('connection', (socket) => {
     socket.to(roomId).emit('stranger_left');
   });
 
-  socket.on('disconnect', () => {
+  socket.on('disconnect', async () => {
     console.log('User disconnected:', socket.id);
     
     // Remove from stranger queue if they were waiting
@@ -191,7 +337,22 @@ io.on('connection', (socket) => {
       
       if (!hasOtherSockets) {
         onlineUsersSet.delete(userId);
-        io.emit('user_offline', userId);
+        
+        try {
+          const { data: friendLinks } = await supabase
+            .from('friends')
+            .select('friend_id')
+            .eq('user_id', userId);
+            
+          const friendIds = friendLinks ? friendLinks.map(link => link.friend_id) : [];
+          for (const friendId of friendIds) {
+            if (onlineUsersSet.has(friendId)) {
+              io.to(friendId).emit('user_offline', userId);
+            }
+          }
+        } catch (err) {
+          console.error('Error fetching friends for offline status:', err);
+        }
       }
     }
   });
@@ -206,13 +367,14 @@ io.on('connection', (socket) => {
 
       const room = [data.caller_id, data.callee_id].sort().join('_');
       let text = '';
-      if (data.status === 'missed') text = '❌ Missed Voice Call';
-      else if (data.status === 'declined') text = '❌ Declined Voice Call';
+      const callTypeStr = data.callType === 'video' ? 'Video' : 'Voice';
+      if (data.status === 'missed') text = `❌ Missed ${callTypeStr} Call`;
+      else if (data.status === 'declined') text = `❌ Declined ${callTypeStr} Call`;
       else {
         const mins = Math.floor(data.duration_seconds / 60);
         const secs = data.duration_seconds % 60;
         const durStr = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
-        text = `📞 Voice Call (${durStr})`;
+        text = `${data.callType === 'video' ? '📹' : '📞'} ${callTypeStr} Call (${durStr})`;
       }
 
       const { data: savedMsg, error: msgError } = await supabase.from('messages').insert([{
@@ -241,17 +403,61 @@ if (process.env.NODE_ENV === 'production') {
   });
 }
 
-// Auto-cleanup home chat messages older than 30 minutes
+// Auto-cleanup home chat messages older than 10 minutes
 setInterval(async () => {
   try {
-    const thirtyMinsAgo = new Date(Date.now() - 30 * 60000).toISOString();
+    const tenMinsAgo = new Date(Date.now() - 10 * 60000).toISOString();
     await supabase
       .from('messages')
       .delete()
       .eq('room', 'home_chat')
-      .lt('created_at', thirtyMinsAgo);
+      .lt('timestamp', tenMinsAgo);
   } catch (err) {
     console.error('Error in auto-cleanup of home_chat:', err);
+  }
+}, 5 * 60000); // Check every 5 minutes
+
+// Auto-cleanup expired stories (older than 24 hours)
+setInterval(async () => {
+  try {
+    const { data: usersWithStories, error } = await supabase
+      .from('users')
+      .select('id, statusVideoUrl')
+      .not('statusVideoUrl', 'is', null);
+
+    if (!error && usersWithStories) {
+      const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000;
+      const now = Date.now();
+
+      for (const u of usersWithStories) {
+        if (!u.statusVideoUrl) continue;
+        const match = u.statusVideoUrl.match(/profile_status_(\d+)/);
+        if (match && match[1]) {
+          const uploadTime = parseInt(match[1], 10);
+          if (now - uploadTime > TWENTY_FOUR_HOURS) {
+            try {
+              const parts = u.statusVideoUrl.split('/abcd/');
+              if (parts.length > 1) {
+                const filePath = decodeURIComponent(parts[1].split('?')[0]);
+                await supabase.storage.from('abcd').remove([filePath]);
+              }
+            } catch (e) {}
+
+            await supabase
+              .from('users')
+              .update({ statusVideoUrl: null, story_views: [] })
+              .eq('id', u.id);
+
+            await supabase
+              .from('messages')
+              .delete()
+              .match({ room: 'story_view', recipientId: u.id });
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.error('Error in auto-cleanup of expired stories:', err);
   }
 }, 5 * 60000); // Check every 5 minutes
 

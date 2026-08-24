@@ -2,16 +2,9 @@ import React, { useState, useContext } from 'react';
 import axios from 'axios';
 import AuthContext from '../context/AuthContext';
 
-function MyProfileModal({ onClose }) {
+function MyProfileModal({ initialTab = 'account', onClose }) {
   const { user, token, login } = useContext(AuthContext);
-  
-  // State for profile fields
-  const [formData, setFormData] = useState({
-    username: user?.username || '',
-    gender: user?.gender || '',
-    country: user?.country || '',
-    birthday: user?.birthday || ''
-  });
+
 
   // State for password change
   const [passwords, setPasswords] = useState({
@@ -22,29 +15,45 @@ function MyProfileModal({ onClose }) {
 
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
-  const [activeTab, setActiveTab] = useState('profile'); // 'profile' or 'security'
+  const [activeTab, setActiveTab] = useState(initialTab === 'security' ? 'security' : 'account');
 
-  const handleProfileChange = (e) => {
-    setFormData({ ...formData, [e.target.name]: e.target.value });
+  // State for editable profile fields
+  const [profileData, setProfileData] = useState({
+    country: user?.country || '',
+    gender: user?.gender || 'Other',
+    birthday: user?.birthday || ''
+  });
+
+  const calculateAge = (birthdayString) => {
+    if (!birthdayString) return '';
+    const today = new Date();
+    const birthDate = new Date(birthdayString);
+    let age = today.getFullYear() - birthDate.getFullYear();
+    const m = today.getMonth() - birthDate.getMonth();
+    if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
+      age--;
+    }
+    return age;
   };
 
-  const handlePasswordChange = (e) => {
-    setPasswords({ ...passwords, [e.target.name]: e.target.value });
-  };
-
-  const handleSaveProfile = async (e) => {
+  const handleUpdateProfile = async (e) => {
     e.preventDefault();
     setMessage('');
     setError('');
     
+    const age = calculateAge(profileData.birthday);
+    if (age !== '' && age < 18) {
+      return setError('You must be at least 18 years old.');
+    }
+
     try {
-      const res = await axios.put('/api/users/me', formData, {
+      const res = await axios.put('/api/users/me', profileData, {
         headers: { 'x-auth-token': token }
       });
       setMessage(res.data.msg);
-      
-      // Update local user state
-      login({ ...user, ...formData }, token);
+      // Fetch fresh user data to update the AuthContext
+      const meRes = await axios.get('/api/users/me', { headers: { 'x-auth-token': token }});
+      login(meRes.data, token); // Update context
     } catch (err) {
       setError(err.response?.data?.msg || 'Failed to update profile');
     }
@@ -80,10 +89,10 @@ function MyProfileModal({ onClose }) {
         
         <div className="profile-tabs">
           <button 
-            className={`tab-btn ${activeTab === 'profile' ? 'active' : ''}`}
-            onClick={() => { setActiveTab('profile'); setMessage(''); setError(''); }}
+            className={`tab-btn ${activeTab === 'account' ? 'active' : ''}`}
+            onClick={() => { setActiveTab('account'); setMessage(''); setError(''); }}
           >
-            Profile Details
+            Account Details
           </button>
           <button 
             className={`tab-btn ${activeTab === 'security' ? 'active' : ''}`}
@@ -96,60 +105,68 @@ function MyProfileModal({ onClose }) {
         {message && <div className="success-text" style={{ color: 'var(--success)', textAlign: 'center', marginBottom: '10px', fontSize: '0.9rem' }}>{message}</div>}
         {error && <div className="error-text" style={{ marginBottom: '10px' }}>{error}</div>}
 
-        {activeTab === 'profile' && (
-          <form onSubmit={handleSaveProfile} className="profile-form">
+        {activeTab === 'account' && (
+          <form className="profile-form" onSubmit={handleUpdateProfile}>
+            <div className="form-group readonly-group">
+              <label>Name / Username</label>
+              <input type="text" className="form-control" value={user?.username || ''} readOnly disabled style={{opacity: 0.7, cursor: 'not-allowed'}} />
+            </div>
+
+            <div className="form-group readonly-group">
+              <label>User ID</label>
+              <input type="text" className="form-control" value={user?.id || user?._id || ''} readOnly disabled style={{opacity: 0.7, cursor: 'not-allowed'}} />
+            </div>
+
             <div className="form-group readonly-group">
               <label>Email</label>
               <input type="email" className="form-control" value={user?.email || ''} readOnly disabled style={{opacity: 0.7, cursor: 'not-allowed'}} />
             </div>
 
-            <div className="form-group">
-              <label>Username</label>
-              <input 
-                type="text" 
-                className="form-control" 
-                name="username" 
-                value={formData.username} 
-                onChange={handleProfileChange} 
-                required 
-              />
-            </div>
-
             <div className="form-row" style={{ display: 'flex', gap: '15px' }}>
               <div className="form-group half" style={{ flex: 1 }}>
-                <label>Gender</label>
-                <select className="form-control" name="gender" value={formData.gender} onChange={handleProfileChange}>
-                  <option value="">Select</option>
-                  <option value="male">Male</option>
-                  <option value="female">Female</option>
-                  <option value="other">Other</option>
+                <label>Country / Region</label>
+                <select 
+                  className="form-control" 
+                  value={profileData.country}
+                  onChange={(e) => setProfileData({...profileData, country: e.target.value})}
+                >
+                  <option value="">Select Country</option>
+                  <option value="India">India</option>
+                  <option value="United States">United States</option>
+                  <option value="United Kingdom">United Kingdom</option>
+                  <option value="Canada">Canada</option>
+                  <option value="Australia">Australia</option>
+                  <option value="Other">Other</option>
                 </select>
               </div>
               <div className="form-group half" style={{ flex: 1 }}>
-                <label>Birthday</label>
-                <input 
-                  type="date" 
+                <label>Gender</label>
+                <select 
                   className="form-control" 
-                  name="birthday" 
-                  value={formData.birthday} 
-                  onChange={handleProfileChange} 
-                />
+                  value={profileData.gender}
+                  onChange={(e) => setProfileData({...profileData, gender: e.target.value})}
+                >
+                  <option value="Male">Male</option>
+                  <option value="Female">Female</option>
+                  <option value="Other">Other</option>
+                </select>
               </div>
             </div>
 
             <div className="form-group">
-              <label>Country / Region</label>
+              <label>Birthday <span style={{ fontWeight: 'normal', color: '#a0a0a0', marginLeft: '10px' }}>{profileData.birthday ? `(Age: ${calculateAge(profileData.birthday)})` : ''}</span></label>
               <input 
-                type="text" 
+                type="date" 
                 className="form-control" 
-                name="country" 
-                value={formData.country} 
-                onChange={handleProfileChange} 
-                placeholder="e.g. India, USA"
+                value={profileData.birthday}
+                onChange={(e) => setProfileData({...profileData, birthday: e.target.value})}
+                max={new Date().toISOString().split('T')[0]}
               />
             </div>
 
-            <button type="submit" className="btn-primary full-width" style={{ width: '100%', marginTop: '10px', padding: '12px' }}>Save Profile</button>
+            <button type="submit" className="btn-primary" style={{ width: '100%', marginTop: '10px' }}>
+              Save Profile Changes
+            </button>
           </form>
         )}
 
@@ -162,7 +179,7 @@ function MyProfileModal({ onClose }) {
                 className="form-control" 
                 name="currentPassword" 
                 value={passwords.currentPassword} 
-                onChange={handlePasswordChange} 
+                onChange={(e) => setPasswords({ ...passwords, [e.target.name]: e.target.value })} 
                 required 
               />
             </div>
@@ -173,7 +190,7 @@ function MyProfileModal({ onClose }) {
                 className="form-control" 
                 name="newPassword" 
                 value={passwords.newPassword} 
-                onChange={handlePasswordChange} 
+                onChange={(e) => setPasswords({ ...passwords, [e.target.name]: e.target.value })} 
                 required 
                 minLength="6"
               />
@@ -185,7 +202,7 @@ function MyProfileModal({ onClose }) {
                 className="form-control" 
                 name="confirmPassword" 
                 value={passwords.confirmPassword} 
-                onChange={handlePasswordChange} 
+                onChange={(e) => setPasswords({ ...passwords, [e.target.name]: e.target.value })} 
                 required 
                 minLength="6"
               />

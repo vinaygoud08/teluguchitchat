@@ -11,21 +11,40 @@ import GuestLoginModal from './components/GuestLoginModal';
 import AuthContext from './context/AuthContext';
 import UserSidebar from './components/UserSidebar';
 import CallOverlay from './components/CallOverlay';
+import AccountModal from './components/AccountModal';
+import SettingsMenu from './components/SettingsMenu';
+import NotificationsMenu from './components/NotificationsMenu';
+import PrivacyMenu from './components/PrivacyMenu';
+import LanguageMenu from './components/LanguageMenu';
+import WelcomeScreen from './components/WelcomeScreen';
+import { LanguageProvider } from './context/LanguageContext';
+import { useSettings } from './context/SettingsContext';
+import { generateKeyPair, exportPublicKey, exportPrivateKey } from './utils/crypto';
 
 const socket = io(import.meta.env.VITE_BACKEND_URL || '/');
 
 function App() {
+  const { playNotificationSound } = useSettings();
   const [user, setUser] = useState(null);
   const [token, setToken] = useState(localStorage.getItem('token'));
   const [showLogin, setShowLogin] = useState(false);
   const [showRegister, setShowRegister] = useState(false);
   const [showForgotPassword, setShowForgotPassword] = useState(false);
   const [showResetPassword, setShowResetPassword] = useState(false);
-  const [showProfile, setShowProfile] = useState(false);
   const [showGuestLogin, setShowGuestLogin] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [showAccount, setShowAccount] = useState(false);
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [showPrivacy, setShowPrivacy] = useState(false);
+  const [showLanguage, setShowLanguage] = useState(false);
+  
+  const menuRef = useRef(null);
   const [resetToken, setResetToken] = useState(null);
-  const [activeChat, setActiveChat] = useState('home');
+  const [activeChat, setActiveChat] = useState(null);
+  const activeChatRef = useRef(null);
+  const [unreadCounts, setUnreadCounts] = useState({});
   const [users, setUsers] = useState([]);
+  const [myGroups, setMyGroups] = useState([]);
   const [onlineUsers, setOnlineUsers] = useState(new Set());
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(true);
   const [isSearchingStranger, setIsSearchingStranger] = useState(false);
@@ -33,6 +52,16 @@ function App() {
 
   const handleSetActiveChat = (chatId) => {
     setActiveChat(chatId);
+    activeChatRef.current = chatId;
+    
+    // Clear unread count for this chat
+    setUnreadCounts(prev => {
+      if (!prev[chatId]) return prev;
+      const newCounts = { ...prev };
+      delete newCounts[chatId];
+      return newCounts;
+    });
+
     // On mobile, close sidebar when chat is selected
     if (window.innerWidth <= 768) {
       setMobileSidebarOpen(false);
@@ -72,6 +101,17 @@ function App() {
         window.history.replaceState({}, document.title, window.location.pathname);
       }
     }
+
+    const handleClickOutside = (event) => {
+      if (menuRef.current && !menuRef.current.contains(event.target)) {
+        setShowSettings(false);
+        setShowAccount(false);
+        setShowNotifications(false);
+        setShowPrivacy(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
   // Fetch users list and current user profile
@@ -92,17 +132,34 @@ function App() {
         localStorage.setItem('user', JSON.stringify(res.data));
       }).catch(err => console.error(err));
 
+      // Fetch user's groups
+      axios.get('/api/groups/my-groups', {
+        headers: { 'x-auth-token': token }
+      }).then(res => setMyGroups(res.data)).catch(console.error);
+
     } else {
       setUsers([]);
+      setMyGroups([]);
       setActiveChat('home');
     }
   }, [token]);
 
   // Socket signaling configuration for calls
   useEffect(() => {
-    if (user) {
-      socket.emit('join_user', user.id);
+    if (!user) return;
+
+    const joinUserRoom = () => {
+      socket.emit('join_user', user.id || user._id);
+    };
+
+    if (socket.connected) {
+      joinUserRoom();
     }
+
+    socket.on('connect', joinUserRoom);
+    return () => {
+      socket.off('connect', joinUserRoom);
+    };
   }, [user]);
 
   // Online status tracking
@@ -141,12 +198,14 @@ function App() {
   useEffect(() => {
     const handleIncomingCall = (data) => {
       console.log("Received call_incoming from", data.name);
+      playNotificationSound('calls');
       setCallSession({
         state: 'incoming',
         role: 'callee',
         otherUser: { id: data.from, username: data.name },
         incomingSignal: data.signal,
         acceptedSignal: null,
+        callType: data.callType || 'audio',
       });
     };
 
@@ -164,7 +223,8 @@ function App() {
       if (!iceCandidatesMap.current[data.from]) {
         iceCandidatesMap.current[data.from] = [];
       }
-      iceCandidatesMap.current[data.from].push(data.candidate);
+      // Reassign to a new array so the reference changes and useEffect triggers in CallOverlay
+      iceCandidatesMap.current[data.from] = [...iceCandidatesMap.current[data.from], data.candidate];
       
       // Trigger a render so CallOverlay gets the updated array
       setCallSession(prev => ({ ...prev, trigger: Math.random() }));
@@ -182,6 +242,7 @@ function App() {
     };
 
     const handleStrangerMatch = ({ room, otherUserId }) => {
+      playNotificationSound('randomChat');
       setIsSearchingStranger(false);
       setStrangerUserIds(prev => ({ ...prev, [room]: otherUserId }));
       setActiveChat(room);
@@ -202,6 +263,46 @@ function App() {
     socket.on('stranger_match', handleStrangerMatch);
     socket.on('stranger_left', handleStrangerLeft);
 
+    const handleFriendRequestReceived = () => {
+      // Refresh current user to get updated friend requests
+      if (token) {
+        axios.get('/api/users/me', {
+          headers: { 'x-auth-token': token }
+        }).then(res => {
+          setUser(res.data);
+          localStorage.setItem('user', JSON.stringify(res.data));
+        }).catch(err => console.error(err));
+      }
+    };
+
+    const handleUnreadMessage = (msg) => {
+      if (user && (msg.senderId === user.id || msg.senderId === user._id)) return;
+      
+      const isPrivate = msg.room && msg.room.includes('_');
+      const badgeKey = isPrivate ? msg.senderId : msg.room;
+
+      if (activeChatRef.current !== badgeKey) {
+        playNotificationSound('messages');
+        setUnreadCounts(prev => ({
+          ...prev,
+          [badgeKey]: (prev[badgeKey] || 0) + 1
+        }));
+      }
+    };
+
+    const handleAddedToGroup = (group) => {
+      setMyGroups(prev => {
+        if (prev.find(g => g.id === group.id)) return prev;
+        return [...prev, group];
+      });
+      socket.emit('join_group', group.id);
+    };
+
+    socket.on('receive_friend_request', handleFriendRequestReceived);
+    socket.on('receive_private_message', handleUnreadMessage);
+    socket.on('receive_group_message', handleUnreadMessage);
+    socket.on('added_to_group', handleAddedToGroup);
+
     return () => {
       socket.off('call_incoming', handleIncomingCall);
       socket.off('call_accepted', handleCallAccepted);
@@ -210,8 +311,12 @@ function App() {
       socket.off('call_declined', handleCallDeclined);
       socket.off('stranger_match', handleStrangerMatch);
       socket.off('stranger_left', handleStrangerLeft);
+      socket.off('receive_friend_request', handleFriendRequestReceived);
+      socket.off('receive_private_message', handleUnreadMessage);
+      socket.off('receive_group_message', handleUnreadMessage);
+      socket.off('added_to_group', handleAddedToGroup);
     };
-  }, [user]);
+  }, [user, token, socket]);
 
   const resetCallSession = () => {
     iceCandidatesMap.current = {};
@@ -222,10 +327,11 @@ function App() {
       acceptedSignal: null,
       incomingSignal: null,
       trigger: 0,
+      callType: 'audio'
     });
   };
 
-  const initiateCall = () => {
+  const initiateCall = (type = 'audio') => {
     if (!user || activeChat === 'home') return;
     const targetUser = users.find(u => u.id === activeChat);
     const targetUsername = targetUser ? targetUser.username : 'User';
@@ -237,6 +343,7 @@ function App() {
       acceptedSignal: null,
       incomingSignal: null,
       trigger: 0,
+      callType: type
     });
   };
 
@@ -247,7 +354,7 @@ function App() {
     }));
   };
 
-  const login = (userData, jwtToken) => {
+  const login = async (userData, jwtToken) => {
     setUser(userData);
     setToken(jwtToken);
     localStorage.setItem('token', jwtToken);
@@ -255,6 +362,36 @@ function App() {
     setShowLogin(false);
     setShowGuestLogin(false);
     setShowRegister(false);
+
+    // E2EE Setup
+    try {
+      const storedPrivateKey = localStorage.getItem(`privateKey_${userData.id}`);
+      if (!storedPrivateKey) {
+        console.log('Generating E2EE keys...');
+        const keyPair = await generateKeyPair();
+        const publicKeyPem = await exportPublicKey(keyPair.publicKey);
+        const privateKeyPem = await exportPrivateKey(keyPair.privateKey);
+        
+        localStorage.setItem(`privateKey_${userData.id}`, privateKeyPem);
+        
+        await axios.put('/api/users/public-key', { public_key: publicKeyPem }, {
+          headers: { 'x-auth-token': jwtToken }
+        }).catch(err => console.error("Could not save public key to backend. Make sure the column exists.", err));
+      } else if (!userData.public_key) {
+        // We have local key but backend is missing it (e.g. after adding column later)
+        // We need the corresponding public key. For simplicity, just regenerate.
+        console.log('Backend missing public key, regenerating...');
+        const keyPair = await generateKeyPair();
+        const publicKeyPem = await exportPublicKey(keyPair.publicKey);
+        const privateKeyPem = await exportPrivateKey(keyPair.privateKey);
+        localStorage.setItem(`privateKey_${userData.id}`, privateKeyPem);
+        await axios.put('/api/users/public-key', { public_key: publicKeyPem }, {
+          headers: { 'x-auth-token': jwtToken }
+        }).catch(e => console.error(e));
+      }
+    } catch (err) {
+      console.error('Failed to setup E2EE keys:', err);
+    }
   };
 
   const logout = () => {
@@ -265,47 +402,90 @@ function App() {
     setActiveChat('home');
   };
 
+
+
+  const handleDeleteAccount = async (password) => {
+    if (!password) {
+      alert("Password is required to delete your account.");
+      return;
+    }
+    try {
+      await axios.delete('/api/users/me', { 
+        headers: { 'x-auth-token': token },
+        data: { password }
+      });
+      logout();
+      alert("Your account has been deleted.");
+    } catch (err) {
+      alert(err.response?.data?.msg || "Failed to delete account. Please try again.");
+    }
+  };
+
   return (
-    <AuthContext.Provider value={{ user, token, login, logout }}>
-      <div className="app-container">
+    <AuthContext.Provider value={{ user, token, login, logout, setUser }}>
+      <LanguageProvider>
+        <div className="app-container">
         <header className="app-header">
           <div className="brand">Chit Chat Telugu</div>
           <div className="auth-buttons">
             {user ? (
-              <>
-                <button className="btn-secondary" onClick={() => setShowProfile(true)} style={{ marginRight: '10px' }}>My Profile</button>
-                <button className="btn-secondary" onClick={logout}>Logout</button>
-              </>
+              <div>
+                <button 
+                  className="btn-secondary" 
+                  onClick={() => setShowSettings(true)} 
+                  style={{ background: 'transparent', border: 'none', fontSize: '1.5rem', padding: '0 10px', cursor: 'pointer', color: 'white' }}
+                >
+                  ☰
+                </button>
+              </div>
             ) : (
               <>
-                <button className="btn-secondary" onClick={() => setShowLogin(true)}>Login</button>
-                <button className="btn-primary" onClick={() => setShowRegister(true)}>Register</button>
+                <button className="btn-secondary" onClick={() => setShowLogin(true)}>Log in</button>
+                <button className="btn-primary" onClick={() => setShowRegister(true)}>Sign up</button>
               </>
             )}
           </div>
         </header>
 
+        {!user && !showLogin && !showRegister && !showForgotPassword && !showResetPassword && !showGuestLogin && (
+          <WelcomeScreen 
+            onSignUp={() => setShowRegister(true)} 
+            onLogin={() => setShowLogin(true)} 
+          />
+        )}
+
         <div className="main-content">
-          <UserSidebar
-            activeChat={activeChat}
-            setActiveChat={handleSetActiveChat}
-            users={users}
-            setUsers={setUsers}
-            onlineUsers={onlineUsers}
-            mobileSidebarOpen={mobileSidebarOpen}
-            socket={socket}
-            isSearchingStranger={isSearchingStranger}
-            setIsSearchingStranger={setIsSearchingStranger}
-          />
-          <ChatBox
-            socket={socket}
-            activeChat={activeChat}
-            onInitiateCall={initiateCall}
-            users={users}
-            onlineUsers={onlineUsers}
-            onBackToSidebar={() => setMobileSidebarOpen(true)}
-            strangerUserIds={strangerUserIds}
-          />
+          <div style={{ display: activeChat ? 'none' : 'flex', width: '100%', maxWidth: '100%' }}>
+            <UserSidebar
+              activeChat={activeChat}
+              setActiveChat={handleSetActiveChat}
+              users={users}
+              setUsers={setUsers}
+              myGroups={myGroups}
+              setMyGroups={setMyGroups}
+              onlineUsers={onlineUsers}
+              mobileSidebarOpen={mobileSidebarOpen}
+              socket={socket}
+              isSearchingStranger={isSearchingStranger}
+              setIsSearchingStranger={setIsSearchingStranger}
+              unreadCounts={unreadCounts}
+            />
+          </div>
+          {activeChat && (
+            <ChatBox
+              socket={socket}
+              activeChat={activeChat}
+              onInitiateCall={initiateCall}
+              users={users}
+              myGroups={myGroups}
+              onlineUsers={onlineUsers}
+              onBackToSidebar={() => {
+                setActiveChat(null);
+                setMobileSidebarOpen(true);
+              }}
+              strangerUserIds={strangerUserIds}
+            />
+          )}
         </div>
 
         {showLogin && (
@@ -320,24 +500,61 @@ function App() {
         {showGuestLogin && <GuestLoginModal onClose={() => setShowGuestLogin(false)} />}
         {showForgotPassword && <ForgotPasswordModal onClose={() => setShowForgotPassword(false)} />}
         {showResetPassword && <ResetPasswordModal token={resetToken} onClose={() => setShowResetPassword(false)} />}
-        {showProfile && <MyProfileModal onClose={() => setShowProfile(false)} />}
-
-        {callSession.state !== 'idle' && (
-          <CallOverlay
-            socket={socket}
-            user={user}
-            callState={callSession.state}
-            role={callSession.role}
-            otherUser={callSession.otherUser}
-            acceptedSignal={callSession.acceptedSignal}
-            incomingSignal={callSession.incomingSignal}
-            iceCandidates={[...(iceCandidatesMap.current[callSession.otherUser?.id] || [])]}
-            onHangUp={resetCallSession}
-            onAcceptCall={acceptIncomingCall}
-            onDeclineCall={resetCallSession}
+        
+        {showSettings && (
+          <SettingsMenu 
+            onClose={() => setShowSettings(false)}
+            onOpenAccount={() => { setShowSettings(false); setShowAccount(true); }}
+            onOpenNotifications={() => { setShowSettings(false); setShowNotifications(true); }}
+            onOpenPrivacy={() => { setShowSettings(false); setShowPrivacy(true); }}
+            onOpenLanguage={() => { setShowSettings(false); setShowLanguage(true); }}
           />
         )}
+        
+        {showAccount && (
+          <AccountModal 
+            onClose={() => setShowAccount(false)}
+            onLogout={() => { setShowAccount(false); logout(); }}
+            onDeleteAccount={(password) => { setShowAccount(false); handleDeleteAccount(password); }}
+          />
+        )}
+        
+        {showNotifications && (
+          <NotificationsMenu 
+            onClose={() => setShowNotifications(false)}
+          />
+        )}
+        
+        {showPrivacy && (
+          <PrivacyMenu 
+            onClose={() => setShowPrivacy(false)}
+          />
+        )}
+        
+        {showLanguage && (
+          <LanguageMenu 
+            onClose={() => setShowLanguage(false)}
+          />
+        )}
+
+        {callSession.state !== 'idle' && (
+        <CallOverlay
+          socket={socket}
+          user={user}
+          callState={callSession.state}
+          otherUser={callSession.otherUser}
+          acceptedSignal={callSession.acceptedSignal}
+          incomingSignal={callSession.incomingSignal}
+          iceCandidates={iceCandidatesMap.current[callSession.otherUser?.id] || []}
+          onHangUp={resetCallSession}
+          onAcceptCall={acceptIncomingCall}
+          onDeclineCall={resetCallSession}
+          role={callSession.role}
+          callType={callSession.callType}
+        />
+      )}
       </div>
+      </LanguageProvider>
     </AuthContext.Provider>
   );
 }

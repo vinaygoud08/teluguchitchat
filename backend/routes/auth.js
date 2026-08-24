@@ -13,12 +13,27 @@ const generateToken = (userId) => {
   });
 };
 
+// Helper to calculate age
+const calculateAge = (birthdayString) => {
+  if (!birthdayString) return null;
+  const today = new Date();
+  const birthDate = new Date(birthdayString);
+  let age = today.getFullYear() - birthDate.getFullYear();
+  const m = today.getMonth() - birthDate.getMonth();
+  if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
+    age--;
+  }
+  return age;
+};
+
 // Register
 router.post('/register', async (req, res) => {
   try {
-    const { username, email, password, age, gender } = req.body;
+    const { username, email, password, birthday, gender, country } = req.body;
 
-    if (age && parseInt(age) < 18) {
+    const age = calculateAge(birthday);
+
+    if (age !== null && age < 18) {
       return res.status(400).json({ msg: 'You must be at least 18 years old to register.' });
     }
 
@@ -44,7 +59,9 @@ router.post('/register', async (req, res) => {
       username,
       email,
       password: hashedPassword,
-      age: age ? parseInt(age) : null,
+      age: age,
+      birthday: birthday || null,
+      country: country || null,
       gender,
       is_verified: false,
       verification_token: verificationToken

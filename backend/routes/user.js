@@ -16,15 +16,35 @@ const verifyToken = async (req, res, next) => {
   }
 };
 
+// Helper function to check if a story is older than 24 hours
+function isStoryExpired(statusVideoUrl) {
+  if (!statusVideoUrl) return false;
+  const match = statusVideoUrl.match(/profile_status_(\d+)/);
+  if (match && match[1]) {
+    const uploadTime = parseInt(match[1], 10);
+    const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000;
+    if (Date.now() - uploadTime > TWENTY_FOUR_HOURS) {
+      return true;
+    }
+  }
+  return false;
+}
+
 // Helper function to get populated user
 async function getPopulatedUser(userId) {
   const { data: user, error: userError } = await supabase
     .from('users')
-    .select('*')
+    .select('id, username, email, age, gender, profileSongUrl, statusVideoUrl, birthday, country, phone_number, is_verified, created_at, hidden_story_from')
     .eq('id', userId)
     .single();
 
   if (userError || !user) return null;
+
+  // Check if own story is expired (24 hours)
+  if (user.statusVideoUrl && isStoryExpired(user.statusVideoUrl)) {
+    user.statusVideoUrl = null;
+    supabase.from('users').update({ statusVideoUrl: null, story_views: [] }).eq('id', userId).then(() => {}).catch(() => {});
+  }
 
   // Get friends
   const { data: friendLinks } = await supabase
@@ -37,9 +57,21 @@ async function getPopulatedUser(userId) {
     const friendIds = friendLinks.map(link => link.friend_id);
     const { data: friendsData } = await supabase
       .from('users')
-      .select('id, username, email')
+      .select('id, username, email, statusVideoUrl, profileSongUrl, hidden_story_from')
       .in('id', friendIds);
-    friends = friendsData || [];
+    
+    // Filter out stories if this user is in their hidden_story_from array or if story is older than 24 hours
+    friends = (friendsData || []).map(f => {
+      const hiddenFrom = f.hidden_story_from || [];
+      const expired = isStoryExpired(f.statusVideoUrl);
+      if (expired) {
+        supabase.from('users').update({ statusVideoUrl: null, story_views: [] }).eq('id', f.id).then(() => {}).catch(() => {});
+      }
+      if (hiddenFrom.includes(userId) || expired) {
+        return { ...f, statusVideoUrl: null }; // Hide or expired story
+      }
+      return f;
+    });
   }
 
   // Get friend requests received
@@ -82,7 +114,15 @@ router.get('/', verifyToken, async (req, res) => {
       .neq('id', req.user.id);
       
     if (error) throw error;
-    res.json(users);
+
+    const sanitizedUsers = (users || []).map(u => {
+      if (isStoryExpired(u.statusVideoUrl)) {
+        return { ...u, statusVideoUrl: null };
+      }
+      return u;
+    });
+
+    res.json(sanitizedUsers);
   } catch (err) {
     console.error(err);
     res.status(500).send('Server error');
@@ -204,17 +244,35 @@ router.post('/reject-friend/:id', verifyToken, async (req, res) => {
   }
 });
 
+// Helper to calculate age
+const calculateAge = (birthdayString) => {
+  if (!birthdayString) return null;
+  const today = new Date();
+  const birthDate = new Date(birthdayString);
+  let age = today.getFullYear() - birthDate.getFullYear();
+  const m = today.getMonth() - birthDate.getMonth();
+  if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
+    age--;
+  }
+  return age;
+};
+
 // Update Profile
 router.put('/me', verifyToken, async (req, res) => {
   try {
-    const { username, gender, country, birthday } = req.body;
+    const { username, gender, country, birthday, phone_number, hidden_story_from } = req.body;
     
     const updates = {};
     if (username) updates.username = username;
     if (gender) updates.gender = gender;
-    // We try to update country and birthday. If they don't exist in Supabase, this might throw an error.
-    if (country) updates.country = country;
-    if (birthday) updates.birthday = birthday;
+    if (phone_number !== undefined) updates.phone_number = phone_number === '' ? null : phone_number;
+    if (hidden_story_from !== undefined) updates.hidden_story_from = hidden_story_from;
+    
+    if (country !== undefined) updates.country = country;
+    if (birthday !== undefined) {
+      updates.birthday = birthday === '' ? null : birthday;
+      updates.age = calculateAge(birthday);
+    }
 
     const { error: updateError } = await supabase
       .from('users')
@@ -248,6 +306,196 @@ router.post('/change-password', verifyToken, async (req, res) => {
     if (updateError) return res.status(400).json({ msg: updateError.message });
 
     res.json({ msg: 'Password changed successfully' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).send('Server error');
+  }
+});
+
+// Record a story view
+router.post('/story-view/:targetUserId', verifyToken, async (req, res) => {
+  try {
+    const viewerId = req.user.id;
+    const ownerId = req.params.targetUserId;
+    if (viewerId === ownerId) return res.json({ msg: 'Viewed own story' });
+
+    // Check if view already exists
+    const { data: existing } = await supabase
+      .from('messages')
+      .select('id')
+      .match({ room: 'story_view', senderId: viewerId, recipientId: ownerId })
+      .single();
+
+    if (!existing) {
+      await supabase
+        .from('messages')
+        .insert([{
+          room: 'story_view',
+          senderId: viewerId,
+          recipientId: ownerId,
+          text: 'viewed'
+        }]);
+    }
+    res.json({ msg: 'Story view recorded' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).send('Server error');
+  }
+});
+
+// Get viewers of my story
+router.get('/story-views', verifyToken, async (req, res) => {
+  try {
+    const ownerId = req.user.id;
+    const { data: views, error } = await supabase
+      .from('messages')
+      .select('senderId, timestamp')
+      .match({ room: 'story_view', recipientId: ownerId })
+      .order('timestamp', { ascending: false });
+      
+    if (error) throw error;
+    
+    if (!views || views.length === 0) {
+      return res.json([]);
+    }
+    
+    const viewerIds = [...new Set(views.map(v => v.senderId))];
+    const { data: usersData } = await supabase
+      .from('users')
+      .select('id, username')
+      .in('id', viewerIds);
+      
+    // Combine to get view time
+    const result = viewerIds.map(vid => {
+      const u = usersData?.find(user => user.id === vid) || { username: 'Unknown' };
+      const vTime = views.find(v => v.senderId === vid).timestamp;
+      return { id: vid, username: u.username, viewed_at: vTime };
+    });
+      
+    res.json(result);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send('Server error');
+  }
+});
+
+// Get Story Views for the logged-in user
+router.get('/story-views', verifyToken, async (req, res) => {
+  try {
+    const { data: user, error: userError } = await supabase
+      .from('users')
+      .select('story_views')
+      .eq('id', req.user.id)
+      .single();
+    
+    if (userError) throw userError;
+
+    const viewerIds = user.story_views || [];
+    if (viewerIds.length === 0) return res.json([]);
+
+    const { data: viewers, error: viewersError } = await supabase
+      .from('users')
+      .select('id, username, _id')
+      .in('id', viewerIds);
+
+    if (viewersError) throw viewersError;
+    res.json(viewers || []);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send('Server error');
+  }
+});
+
+// Record a view for a target user's story
+router.post('/story-view/:targetUserId', verifyToken, async (req, res) => {
+  try {
+    const { targetUserId } = req.params;
+    const currentUserId = req.user.id;
+
+    // Don't record own view
+    if (targetUserId === currentUserId) return res.json({ msg: 'Own story' });
+
+    // Fetch the target user's story views
+    const { data: targetUser, error: fetchError } = await supabase
+      .from('users')
+      .select('story_views')
+      .eq('id', targetUserId)
+      .single();
+    
+    if (fetchError) throw fetchError;
+
+    const views = targetUser.story_views || [];
+    
+    // If we haven't already viewed it, add our ID
+    if (!views.includes(currentUserId)) {
+      const { error: updateError } = await supabase
+        .from('users')
+        .update({ story_views: [...views, currentUserId] })
+        .eq('id', targetUserId);
+      if (updateError) throw updateError;
+    }
+
+    res.json({ msg: 'View recorded' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).send('Server error');
+  }
+});
+
+
+
+// Save public key
+router.put('/public-key', verifyToken, async (req, res) => {
+  try {
+    const { public_key } = req.body;
+    
+    const { error } = await supabase
+      .from('users')
+      .update({ public_key })
+      .eq('id', req.user.id);
+      
+    if (error) {
+      // Column might not exist in database, return success to prevent frontend console errors
+      return res.json({ msg: 'Public key ignored (column not configured in DB)' });
+    }
+    
+    res.json({ msg: 'Public key saved successfully' });
+  } catch (err) {
+    res.json({ msg: 'Public key ignored' });
+  }
+});
+
+// Delete Account
+router.delete('/me', verifyToken, async (req, res) => {
+  try {
+    const { password } = req.body;
+
+    const { data: userProfile, error: profileError } = await supabase
+      .from('users')
+      .select('password')
+      .eq('id', req.user.id)
+      .single();
+
+    if (profileError || !userProfile) {
+      return res.status(404).json({ msg: 'User not found' });
+    }
+
+    if (userProfile.password !== 'handled_by_guest_auth') {
+      if (!password) {
+        return res.status(400).json({ msg: 'Password is required to delete your account' });
+      }
+      const isMatch = await bcrypt.compare(password, userProfile.password);
+      if (!isMatch) {
+        return res.status(400).json({ msg: 'Incorrect password' });
+      }
+    }
+
+    const { error } = await supabase.from('users').delete().eq('id', req.user.id);
+    if (error) {
+      console.error('Delete Error:', error);
+      return res.status(500).json({ msg: 'Failed to delete account.' });
+    }
+    res.json({ msg: 'Account deleted successfully' });
   } catch (err) {
     console.error(err);
     res.status(500).send('Server error');
