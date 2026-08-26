@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Phone, PhoneOff, Mic, MicOff, Volume2, VolumeX, Video, VideoOff } from 'lucide-react';
+import { Phone, PhoneOff, Mic, MicOff, Volume2, VolumeX, Video, VideoOff, SwitchCamera, FlipHorizontal } from 'lucide-react';
 
 const CallOverlay = ({
   socket,
@@ -16,6 +16,9 @@ const CallOverlay = ({
   callType
 }) => {
   const [isMuted, setIsMuted] = useState(false);
+  const [isVideoOff, setIsVideoOff] = useState(false);
+  const [facingMode, setFacingMode] = useState('user');
+  const [isMirrored, setIsMirrored] = useState(false);
   const [isSpeakerOn, setIsSpeakerOn] = useState(false);
   const [duration, setDuration] = useState(0);
   const [audioFailed, setAudioFailed] = useState(false);
@@ -261,7 +264,11 @@ const CallOverlay = ({
           noiseSuppression: { ideal: true },
           autoGainControl: { ideal: true }
         }, 
-        video: callType === 'video' 
+        video: callType === 'video' ? {
+          facingMode: { ideal: facingMode },
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
+        } : false
       });
       if (!isMountedRef.current) {
         stream.getTracks().forEach(track => track.stop());
@@ -291,7 +298,7 @@ const CallOverlay = ({
       });
     } catch (err) {
       console.error("Failed to setup WebRTC as caller:", err);
-      alert("Could not access microphone. Make sure microphone permissions are enabled.");
+      alert("Could not access camera/microphone. Make sure permissions are enabled.");
       onHangUp();
     }
   };
@@ -304,7 +311,11 @@ const CallOverlay = ({
           noiseSuppression: { ideal: true },
           autoGainControl: { ideal: true }
         }, 
-        video: callType === 'video' 
+        video: callType === 'video' ? {
+          facingMode: { ideal: facingMode },
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
+        } : false
       });
       if (!isMountedRef.current) {
         stream.getTracks().forEach(track => track.stop());
@@ -316,7 +327,7 @@ const CallOverlay = ({
         localVideoRef.current.play().catch(e => console.error("Local video play failed:", e));
       }
 
-      const pc = createPeerConnection(otherUser.id);
+      const pc = createPeerConnection(otherUser.id || otherUser._id);
       peerConnectionRef.current = pc;
 
       stream.getTracks().forEach(track => pc.addTrack(track, stream));
@@ -341,7 +352,7 @@ const CallOverlay = ({
       });
     } catch (err) {
       console.error("Failed to setup WebRTC as callee:", err);
-      alert("Could not access microphone. Make sure microphone permissions are enabled.");
+      alert("Could not access camera/microphone. Make sure permissions are enabled.");
       onHangUp();
     }
   };
@@ -414,10 +425,66 @@ const CallOverlay = ({
     if (localStreamRef.current) {
       const tracks = localStreamRef.current.getVideoTracks();
       if (tracks.length > 0) {
+        const nextEnabled = !tracks[0].enabled;
         tracks.forEach(track => {
-          track.enabled = !track.enabled;
+          track.enabled = nextEnabled;
+        });
+        setIsVideoOff(!nextEnabled);
+      }
+    }
+  };
+
+  const switchCamera = async () => {
+    if (!localStreamRef.current || callType !== 'video') return;
+    try {
+      const nextFacingMode = facingMode === 'user' ? 'environment' : 'user';
+      
+      const oldVideoTrack = localStreamRef.current.getVideoTracks()[0];
+      if (oldVideoTrack) {
+        oldVideoTrack.stop();
+      }
+
+      let newStream;
+      try {
+        newStream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { exact: nextFacingMode } }
+        });
+      } catch (e) {
+        newStream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: nextFacingMode } }
         });
       }
+
+      const newVideoTrack = newStream.getVideoTracks()[0];
+      if (newVideoTrack) {
+        if (oldVideoTrack) {
+          localStreamRef.current.removeTrack(oldVideoTrack);
+        }
+        localStreamRef.current.addTrack(newVideoTrack);
+
+        if (peerConnectionRef.current) {
+          const senders = peerConnectionRef.current.getSenders();
+          const videoSender = senders.find(s => s.track && s.track.kind === 'video');
+          if (videoSender) {
+            await videoSender.replaceTrack(newVideoTrack);
+          } else {
+            peerConnectionRef.current.addTrack(newVideoTrack, localStreamRef.current);
+          }
+        }
+
+        if (localVideoRef.current) {
+          localVideoRef.current.srcObject = localStreamRef.current;
+        }
+
+        setFacingMode(nextFacingMode);
+        // If switched to environment (back camera), disable mirroring
+        if (nextFacingMode === 'environment') {
+          setIsMirrored(false);
+        }
+      }
+    } catch (err) {
+      console.error("Failed to switch camera:", err);
+      alert("Could not switch camera: " + (err.message || "Camera not available"));
     }
   };
 
@@ -453,21 +520,48 @@ const CallOverlay = ({
   return (
     <div className={`call-overlay ${callType === 'video' ? 'video-mode' : ''}`}>
       {callType === 'video' ? (
-        <div className="video-container" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', background: '#000', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', zIndex: -1 }}>
-          <video ref={remoteAudioRef} autoPlay playsInline style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+        <div className="video-container" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', background: '#090a0f', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', zIndex: 0, overflow: 'hidden' }}>
           <video 
-            ref={localVideoRef} 
+            ref={remoteAudioRef} 
             autoPlay 
             playsInline 
-            muted 
-            style={{ position: 'absolute', bottom: '100px', right: '20px', width: '120px', height: '160px', objectFit: 'cover', borderRadius: '8px', border: '2px solid white' }} 
+            style={{ width: '100%', height: '100%', objectFit: 'cover', transform: 'none' }} 
           />
+          <div 
+            className="local-video-preview" 
+            title="Click to toggle mirror / normal view"
+            onClick={() => setIsMirrored(prev => !prev)}
+          >
+            <video 
+              ref={localVideoRef} 
+              autoPlay 
+              playsInline 
+              muted 
+              style={{ 
+                width: '100%', 
+                height: '100%', 
+                objectFit: 'cover', 
+                transform: isMirrored ? 'scaleX(-1)' : 'none',
+                transition: 'transform 0.2s ease',
+                display: isVideoOff ? 'none' : 'block'
+              }} 
+            />
+            {isVideoOff && (
+              <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: '#1e293b', color: '#94a3b8', gap: '4px' }}>
+                <VideoOff size={24} />
+                <span style={{ fontSize: '10px' }}>Video Off</span>
+              </div>
+            )}
+            <div style={{ position: 'absolute', bottom: '4px', left: '6px', fontSize: '9px', background: 'rgba(0,0,0,0.65)', color: 'white', padding: '2px 5px', borderRadius: '4px', pointerEvents: 'none' }}>
+              {isMirrored ? 'Mirrored' : 'Normal'}
+            </div>
+          </div>
         </div>
       ) : (
         <audio ref={remoteAudioRef} autoPlay playsInline />
       )}
       
-      <div className={`call-card ${callType === 'video' && callState === 'connected' ? 'video-controls' : ''}`} style={callType === 'video' && callState === 'connected' ? { position: 'absolute', bottom: '20px', background: 'rgba(0,0,0,0.5)', border: 'none', color: 'white' } : {}}>
+      <div className={`call-card ${callType === 'video' && callState === 'connected' ? 'video-controls' : ''}`}>
         {(!callType || callType !== 'video' || callState !== 'connected') && (
           <div className="call-avatar-container">
             <div className={`call-avatar ${callState === 'outgoing' || callState === 'incoming' ? 'pulsing' : ''}`}>
@@ -479,10 +573,10 @@ const CallOverlay = ({
         {(!callType || callType !== 'video' || callState !== 'connected') && (
           <h3 className="call-user-name">{otherUser?.username || 'User'}</h3>
         )}
-        <p className="call-status" style={callType === 'video' && callState === 'connected' ? { color: 'white' } : {}}>
+        <p className="call-status" style={callType === 'video' && callState === 'connected' ? { color: 'rgba(255,255,255,0.9)', fontSize: '0.85rem' } : {}}>
           {callState === 'outgoing' && 'Calling...'}
           {callState === 'incoming' && `Incoming ${callType === 'video' ? 'Video' : ''} Call...`}
-          {callState === 'connected' && `In Call (${formatTime(duration)})`}
+          {callState === 'connected' && (callType === 'video' ? `In Video Call (${formatTime(duration)})` : `In Call (${formatTime(duration)})`)}
         </p>
 
         {audioFailed && (
@@ -510,14 +604,36 @@ const CallOverlay = ({
             <>
               {callState === 'connected' && (
                 <>
-                  <button className={`call-btn mute ${isMuted ? 'muted' : ''}`} onClick={toggleMute} title={isMuted ? "Unmute" : "Mute"}>
-                    {isMuted ? <MicOff size={24} /> : <Mic size={24} />}
+                  <button className={`call-btn mute ${isMuted ? 'muted' : ''}`} onClick={toggleMute} title={isMuted ? "Unmute Mic" : "Mute Mic"}>
+                    {isMuted ? <MicOff size={22} /> : <Mic size={22} />}
                   </button>
+                  
                   {callType === 'video' && (
-                    <button className="call-btn mute" onClick={toggleVideo} title="Toggle Camera">
-                      <Video size={24} />
-                    </button>
+                    <>
+                      <button 
+                        className={`call-btn mute ${isVideoOff ? 'muted' : ''}`} 
+                        onClick={toggleVideo} 
+                        title={isVideoOff ? "Turn Video On" : "Turn Video Off"}
+                      >
+                        {isVideoOff ? <VideoOff size={22} /> : <Video size={22} />}
+                      </button>
+                      <button 
+                        className="call-btn mute" 
+                        onClick={switchCamera} 
+                        title={`Switch Camera (${facingMode === 'user' ? 'Front/Selfie' : 'Back/Rear'})`}
+                      >
+                        <SwitchCamera size={22} />
+                      </button>
+                      <button 
+                        className={`call-btn mute ${isMirrored ? 'active' : ''}`} 
+                        onClick={() => setIsMirrored(prev => !prev)} 
+                        title={isMirrored ? "Mirror View: ON (Click for Normal)" : "Mirror View: OFF (Click to Mirror)"}
+                      >
+                        <FlipHorizontal size={22} />
+                      </button>
+                    </>
                   )}
+
                   {callType !== 'video' && (
                     <button className={`call-btn mute ${isSpeakerOn ? 'active' : ''}`} onClick={toggleSpeaker} title={isSpeakerOn ? "Speaker On" : "Speaker Off"}>
                       {isSpeakerOn ? <Volume2 size={24} /> : <VolumeX size={24} />}

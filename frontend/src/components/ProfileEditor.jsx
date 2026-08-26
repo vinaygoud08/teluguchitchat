@@ -3,7 +3,7 @@ import axios from 'axios';
 import { useAuth } from '../context/AuthContext';
 
 const ProfileEditor = ({ onClose }) => {
-  const { user, token } = useAuth();
+  const { user, token, setUser } = useAuth();
   const [songFile, setSongFile] = useState(null);
   const [statusFile, setStatusFile] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -19,14 +19,19 @@ const ProfileEditor = ({ onClose }) => {
     formData.append('type', type);
 
     try {
-      await axios.post('/api/media/upload-profile-media', formData, {
+      const res = await axios.post('/api/media/upload-profile-media', formData, {
         headers: { 
           'x-auth-token': token,
           'Content-Type': 'multipart/form-data'
         }
       });
-      // Force reload to grab new user object from /me
-      window.location.reload();
+      if (setUser && res.data?.url) {
+        const updatedUser = { ...user, statusVideoUrl: res.data.url, story_views: [] };
+        setUser(updatedUser);
+        localStorage.setItem('user', JSON.stringify(updatedUser));
+      }
+      alert('Status uploaded successfully!');
+      onClose();
     } catch (err) {
       console.error(err);
       setError(err.response?.data?.msg || 'Upload failed');
@@ -43,7 +48,13 @@ const ProfileEditor = ({ onClose }) => {
       await axios.delete('/api/media/story', {
         headers: { 'x-auth-token': token }
       });
-      window.location.reload();
+      if (setUser) {
+        const updatedUser = { ...user, statusVideoUrl: null, story_views: [] };
+        setUser(updatedUser);
+        localStorage.setItem('user', JSON.stringify(updatedUser));
+      }
+      alert('Status deleted successfully!');
+      onClose();
     } catch (err) {
       console.error(err);
       setError(err.response?.data?.msg || 'Failed to delete status');

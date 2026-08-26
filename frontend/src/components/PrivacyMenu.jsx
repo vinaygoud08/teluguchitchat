@@ -3,10 +3,15 @@ import StoryPrivacyModal from './StoryPrivacyModal';
 import './SettingsMenu.css';
 
 function PrivacyMenu({ onClose }) {
-  const [readReceipts, setReadReceipts] = useState(true);
-  const [requireRequest, setRequireRequest] = useState(true);
-  const [showActivity, setShowActivity] = useState(true);
+  const [readReceipts, setReadReceipts] = useState(() => localStorage.getItem('privacy_readReceipts') !== 'false');
+  const [requireRequest, setRequireRequest] = useState(() => localStorage.getItem('privacy_requireRequest') !== 'false');
+  const [showActivity, setShowActivity] = useState(() => localStorage.getItem('privacy_showActivity') !== 'false');
   const [showStoryPrivacy, setShowStoryPrivacy] = useState(false);
+
+  const handleToggle = (key, setter, val) => {
+    setter(val);
+    localStorage.setItem(`privacy_${key}`, val);
+  };
 
   if (showStoryPrivacy) {
     return <StoryPrivacyModal onClose={() => setShowStoryPrivacy(false)} />;
@@ -33,7 +38,7 @@ function PrivacyMenu({ onClose }) {
                 type="checkbox" 
                 className="settings-toggle" 
                 checked={readReceipts}
-                onChange={() => setReadReceipts(!readReceipts)}
+                onChange={(e) => handleToggle('readReceipts', setReadReceipts, e.target.checked)}
               />
             </div>
           </label>
@@ -47,7 +52,7 @@ function PrivacyMenu({ onClose }) {
                 type="checkbox" 
                 className="settings-toggle" 
                 checked={requireRequest}
-                onChange={() => setRequireRequest(!requireRequest)}
+                onChange={(e) => handleToggle('requireRequest', setRequireRequest, e.target.checked)}
               />
             </div>
           </label>
@@ -61,7 +66,7 @@ function PrivacyMenu({ onClose }) {
                 type="checkbox" 
                 className="settings-toggle" 
                 checked={showActivity}
-                onChange={() => setShowActivity(!showActivity)}
+                onChange={(e) => handleToggle('showActivity', setShowActivity, e.target.checked)}
               />
             </div>
           </label>

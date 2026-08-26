@@ -17,6 +17,9 @@ import NotificationsMenu from './components/NotificationsMenu';
 import PrivacyMenu from './components/PrivacyMenu';
 import LanguageMenu from './components/LanguageMenu';
 import WelcomeScreen from './components/WelcomeScreen';
+import AiBotModal from './components/AiBotModal';
+import UpdatesModal from './components/UpdatesModal';
+import { Bot } from 'lucide-react';
 import { LanguageProvider } from './context/LanguageContext';
 import { useSettings } from './context/SettingsContext';
 import { generateKeyPair, exportPublicKey, exportPrivateKey } from './utils/crypto';
@@ -37,7 +40,9 @@ function App() {
   const [showNotifications, setShowNotifications] = useState(false);
   const [showPrivacy, setShowPrivacy] = useState(false);
   const [showLanguage, setShowLanguage] = useState(false);
-  
+  const [showAiBot, setShowAiBot] = useState(false);
+  const [showUpdatesModal, setShowUpdatesModal] = useState(false);
+
   const menuRef = useRef(null);
   const [resetToken, setResetToken] = useState(null);
   const [activeChat, setActiveChat] = useState(null);
@@ -53,7 +58,7 @@ function App() {
   const handleSetActiveChat = (chatId) => {
     setActiveChat(chatId);
     activeChatRef.current = chatId;
-    
+
     // Clear unread count for this chat
     setUnreadCounts(prev => {
       if (!prev[chatId]) return prev;
@@ -140,7 +145,8 @@ function App() {
     } else {
       setUsers([]);
       setMyGroups([]);
-      setActiveChat('home');
+      setActiveChat(null);
+      setIsSearchingStranger(false);
     }
   }, [token]);
 
@@ -167,7 +173,7 @@ function App() {
     const handleOnlineUsers = (usersArr) => {
       setOnlineUsers(new Set(usersArr));
     };
-    
+
     const handleUserOnline = (userId) => {
       setOnlineUsers(prev => {
         const newSet = new Set(prev);
@@ -175,7 +181,7 @@ function App() {
         return newSet;
       });
     };
-    
+
     const handleUserOffline = (userId) => {
       setOnlineUsers(prev => {
         const newSet = new Set(prev);
@@ -187,7 +193,7 @@ function App() {
     socket.on('online_users', handleOnlineUsers);
     socket.on('user_online', handleUserOnline);
     socket.on('user_offline', handleUserOffline);
-    
+
     return () => {
       socket.off('online_users', handleOnlineUsers);
       socket.off('user_online', handleUserOnline);
@@ -225,7 +231,7 @@ function App() {
       }
       // Reassign to a new array so the reference changes and useEffect triggers in CallOverlay
       iceCandidatesMap.current[data.from] = [...iceCandidatesMap.current[data.from], data.candidate];
-      
+
       // Trigger a render so CallOverlay gets the updated array
       setCallSession(prev => ({ ...prev, trigger: Math.random() }));
     };
@@ -277,7 +283,7 @@ function App() {
 
     const handleUnreadMessage = (msg) => {
       if (user && (msg.senderId === user.id || msg.senderId === user._id)) return;
-      
+
       const isPrivate = msg.room && msg.room.includes('_');
       const badgeKey = isPrivate ? msg.senderId : msg.room;
 
@@ -362,6 +368,10 @@ function App() {
     setShowLogin(false);
     setShowGuestLogin(false);
     setShowRegister(false);
+    setActiveChat(null);
+    setMobileSidebarOpen(true);
+    setIsSearchingStranger(false);
+    socket.emit('leave_stranger_queue');
 
     // E2EE Setup
     try {
@@ -371,9 +381,9 @@ function App() {
         const keyPair = await generateKeyPair();
         const publicKeyPem = await exportPublicKey(keyPair.publicKey);
         const privateKeyPem = await exportPrivateKey(keyPair.privateKey);
-        
+
         localStorage.setItem(`privateKey_${userData.id}`, privateKeyPem);
-        
+
         await axios.put('/api/users/public-key', { public_key: publicKeyPem }, {
           headers: { 'x-auth-token': jwtToken }
         }).catch(err => console.error("Could not save public key to backend. Make sure the column exists.", err));
@@ -399,7 +409,9 @@ function App() {
     setToken(null);
     localStorage.removeItem('token');
     localStorage.removeItem('user');
-    setActiveChat('home');
+    setActiveChat(null);
+    setIsSearchingStranger(false);
+    socket.emit('leave_stranger_queue');
   };
 
 
@@ -410,7 +422,7 @@ function App() {
       return;
     }
     try {
-      await axios.delete('/api/users/me', { 
+      await axios.delete('/api/users/me', {
         headers: { 'x-auth-token': token },
         data: { password }
       });
@@ -425,135 +437,200 @@ function App() {
     <AuthContext.Provider value={{ user, token, login, logout, setUser }}>
       <LanguageProvider>
         <div className="app-container">
-        <header className="app-header">
-          <div className="brand">Chit Chat Telugu</div>
-          <div className="auth-buttons">
-            {user ? (
-              <div>
-                <button 
-                  className="btn-secondary" 
-                  onClick={() => setShowSettings(true)} 
-                  style={{ background: 'transparent', border: 'none', fontSize: '1.5rem', padding: '0 10px', cursor: 'pointer', color: 'white' }}
-                >
-                  ☰
-                </button>
-              </div>
-            ) : (
-              <>
-                <button className="btn-secondary" onClick={() => setShowLogin(true)}>Log in</button>
-                <button className="btn-primary" onClick={() => setShowRegister(true)}>Sign up</button>
-              </>
-            )}
-          </div>
-        </header>
+          <header className="app-header">
+            <div className="brand">Chit Chat Telugu</div>
+            <div className="auth-buttons">
+              {user ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <button
+                    className="my-ai-btn"
+                    onClick={() => setShowAiBot(true)}
+                    title="Chat with My AI"
+                    style={{
+                      background: 'rgba(255, 255, 255, 0.15)',
+                      border: '1px solid rgba(255, 255, 255, 0.3)',
+                      borderRadius: '24px',
+                      padding: '6px 14px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '7px',
+                      cursor: 'pointer',
+                      color: '#ffffff',
+                      fontWeight: 700,
+                      fontSize: '0.9rem',
+                      letterSpacing: '0.3px',
+                      backdropFilter: 'blur(10px)',
+                      boxShadow: '0 2px 10px rgba(0, 0, 0, 0.25)',
+                      transition: 'all 0.2s ease'
+                    }}
+                    onMouseEnter={e => { 
+                      e.currentTarget.style.background = 'rgba(255, 255, 255, 0.28)';
+                      e.currentTarget.style.transform = 'translateY(-1px)';
+                    }}
+                    onMouseLeave={e => { 
+                      e.currentTarget.style.background = 'rgba(255, 255, 255, 0.15)';
+                      e.currentTarget.style.transform = 'translateY(0)';
+                    }}
+                  >
+                    <Bot size={19} color="#60a5fa" strokeWidth={2.4} />
+                    <span>My AI</span>
+                  </button>
 
-        {!user && !showLogin && !showRegister && !showForgotPassword && !showResetPassword && !showGuestLogin && (
-          <WelcomeScreen 
-            onSignUp={() => setShowRegister(true)} 
-            onLogin={() => setShowLogin(true)} 
-          />
-        )}
+                  <button
+                    className="btn-secondary"
+                    onClick={() => setShowSettings(true)}
+                    style={{ background: 'transparent', border: 'none', fontSize: '1.5rem', padding: '0 10px', cursor: 'pointer', color: 'white' }}
+                  >
+                    ☰
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <button className="btn-secondary" onClick={() => setShowLogin(true)}>Log in</button>
+                  <button className="btn-primary" onClick={() => setShowRegister(true)}>Sign up</button>
+                </>
+              )}
+            </div>
+          </header>
 
-        <div className="main-content">
-          <div style={{ display: activeChat ? 'none' : 'flex', width: '100%', maxWidth: '100%' }}>
-            <UserSidebar
-              activeChat={activeChat}
-              setActiveChat={handleSetActiveChat}
-              users={users}
-              setUsers={setUsers}
-              myGroups={myGroups}
-              setMyGroups={setMyGroups}
-              onlineUsers={onlineUsers}
-              mobileSidebarOpen={mobileSidebarOpen}
-              socket={socket}
-              isSearchingStranger={isSearchingStranger}
-              setIsSearchingStranger={setIsSearchingStranger}
-              unreadCounts={unreadCounts}
+          {!user && !showLogin && !showRegister && !showForgotPassword && !showResetPassword && !showGuestLogin && (
+            <WelcomeScreen
+              onSignUp={() => setShowRegister(true)}
+              onLogin={() => setShowLogin(true)}
             />
+          )}
+
+          <div className="main-content">
+            <div className={`sidebar-wrapper ${activeChat ? 'mobile-hidden' : ''}`}>
+              <UserSidebar
+                activeChat={activeChat}
+                setActiveChat={handleSetActiveChat}
+                users={users}
+                setUsers={setUsers}
+                myGroups={myGroups}
+                setMyGroups={setMyGroups}
+                onlineUsers={onlineUsers}
+                mobileSidebarOpen={mobileSidebarOpen}
+                socket={socket}
+                isSearchingStranger={isSearchingStranger}
+                setIsSearchingStranger={setIsSearchingStranger}
+                unreadCounts={unreadCounts}
+              />
+            </div>
+
+            <div className={`chat-wrapper ${!activeChat ? 'mobile-hidden' : ''}`}>
+              {activeChat ? (
+                <ChatBox
+                  socket={socket}
+                  activeChat={activeChat}
+                  onInitiateCall={initiateCall}
+                  users={users}
+                  myGroups={myGroups}
+                  onlineUsers={onlineUsers}
+                  onBackToSidebar={() => {
+                    setActiveChat(null);
+                    setMobileSidebarOpen(true);
+                  }}
+                  strangerUserIds={strangerUserIds}
+                />
+              ) : (
+                <div className="no-chat-selected">
+                  <div className="no-chat-card">
+                    <div className="no-chat-logo">
+                      <div className="no-chat-icon">💬</div>
+                    </div>
+                    <h2>Chit Chat Telugu</h2>
+                    <p>Select a conversation from the left to start chatting, make secure encrypted calls, or meet new people with Stranger Chat!</p>
+                    <div className="no-chat-features">
+                      <span>🔒 End-to-End Encrypted</span>
+                      <span>⚡ HD Audio & Video Calls</span>
+                      <span>🤖 My AI Bot Assistant</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
-          {activeChat && (
-            <ChatBox
+
+          {showLogin && (
+            <LoginModal
+              onClose={() => setShowLogin(false)}
+              onForgotPassword={() => { setShowLogin(false); setShowForgotPassword(true); }}
+              onRegister={() => { setShowLogin(false); setShowRegister(true); }}
+              onGuestLogin={() => { setShowLogin(false); setShowGuestLogin(true); }}
+            />
+          )}
+          {showRegister && <RegisterModal onClose={() => setShowRegister(false)} />}
+          {showGuestLogin && <GuestLoginModal onClose={() => setShowGuestLogin(false)} />}
+          {showForgotPassword && <ForgotPasswordModal onClose={() => setShowForgotPassword(false)} />}
+          {showResetPassword && <ResetPasswordModal token={resetToken} onClose={() => setShowResetPassword(false)} />}
+
+          {showSettings && (
+            <SettingsMenu
+              onClose={() => setShowSettings(false)}
+              onOpenAccount={() => { setShowSettings(false); setShowAccount(true); }}
+              onOpenNotifications={() => { setShowSettings(false); setShowNotifications(true); }}
+              onOpenPrivacy={() => { setShowSettings(false); setShowPrivacy(true); }}
+              onOpenLanguage={() => { setShowSettings(false); setShowLanguage(true); }}
+              onCheckUpdate={() => { setShowSettings(false); setShowUpdatesModal(true); }}
+            />
+          )}
+
+          {showUpdatesModal && (
+            <UpdatesModal
+              onClose={() => setShowUpdatesModal(false)}
+            />
+          )}
+
+          {showAccount && (
+            <AccountModal
+              onClose={() => setShowAccount(false)}
+              onLogout={() => { setShowAccount(false); logout(); }}
+              onDeleteAccount={(password) => { setShowAccount(false); handleDeleteAccount(password); }}
+            />
+          )}
+
+          {showNotifications && (
+            <NotificationsMenu
+              onClose={() => setShowNotifications(false)}
+            />
+          )}
+
+          {showPrivacy && (
+            <PrivacyMenu
+              onClose={() => setShowPrivacy(false)}
+            />
+          )}
+
+          {showLanguage && (
+            <LanguageMenu
+              onClose={() => setShowLanguage(false)}
+            />
+          )}
+
+          {showAiBot && (
+            <AiBotModal
+              onClose={() => setShowAiBot(false)}
+            />
+          )}
+
+          {callSession.state !== 'idle' && (
+            <CallOverlay
               socket={socket}
-              activeChat={activeChat}
-              onInitiateCall={initiateCall}
-              users={users}
-              myGroups={myGroups}
-              onlineUsers={onlineUsers}
-              onBackToSidebar={() => {
-                setActiveChat(null);
-                setMobileSidebarOpen(true);
-              }}
-              strangerUserIds={strangerUserIds}
+              user={user}
+              callState={callSession.state}
+              otherUser={callSession.otherUser}
+              acceptedSignal={callSession.acceptedSignal}
+              incomingSignal={callSession.incomingSignal}
+              iceCandidates={iceCandidatesMap.current[callSession.otherUser?.id] || []}
+              onHangUp={resetCallSession}
+              onAcceptCall={acceptIncomingCall}
+              onDeclineCall={resetCallSession}
+              role={callSession.role}
+              callType={callSession.callType}
             />
           )}
         </div>
-
-        {showLogin && (
-          <LoginModal 
-            onClose={() => setShowLogin(false)} 
-            onForgotPassword={() => { setShowLogin(false); setShowForgotPassword(true); }}
-            onRegister={() => { setShowLogin(false); setShowRegister(true); }}
-            onGuestLogin={() => { setShowLogin(false); setShowGuestLogin(true); }}
-          />
-        )}
-        {showRegister && <RegisterModal onClose={() => setShowRegister(false)} />}
-        {showGuestLogin && <GuestLoginModal onClose={() => setShowGuestLogin(false)} />}
-        {showForgotPassword && <ForgotPasswordModal onClose={() => setShowForgotPassword(false)} />}
-        {showResetPassword && <ResetPasswordModal token={resetToken} onClose={() => setShowResetPassword(false)} />}
-        
-        {showSettings && (
-          <SettingsMenu 
-            onClose={() => setShowSettings(false)}
-            onOpenAccount={() => { setShowSettings(false); setShowAccount(true); }}
-            onOpenNotifications={() => { setShowSettings(false); setShowNotifications(true); }}
-            onOpenPrivacy={() => { setShowSettings(false); setShowPrivacy(true); }}
-            onOpenLanguage={() => { setShowSettings(false); setShowLanguage(true); }}
-          />
-        )}
-        
-        {showAccount && (
-          <AccountModal 
-            onClose={() => setShowAccount(false)}
-            onLogout={() => { setShowAccount(false); logout(); }}
-            onDeleteAccount={(password) => { setShowAccount(false); handleDeleteAccount(password); }}
-          />
-        )}
-        
-        {showNotifications && (
-          <NotificationsMenu 
-            onClose={() => setShowNotifications(false)}
-          />
-        )}
-        
-        {showPrivacy && (
-          <PrivacyMenu 
-            onClose={() => setShowPrivacy(false)}
-          />
-        )}
-        
-        {showLanguage && (
-          <LanguageMenu 
-            onClose={() => setShowLanguage(false)}
-          />
-        )}
-
-        {callSession.state !== 'idle' && (
-        <CallOverlay
-          socket={socket}
-          user={user}
-          callState={callSession.state}
-          otherUser={callSession.otherUser}
-          acceptedSignal={callSession.acceptedSignal}
-          incomingSignal={callSession.incomingSignal}
-          iceCandidates={iceCandidatesMap.current[callSession.otherUser?.id] || []}
-          onHangUp={resetCallSession}
-          onAcceptCall={acceptIncomingCall}
-          onDeclineCall={resetCallSession}
-          role={callSession.role}
-          callType={callSession.callType}
-        />
-      )}
-      </div>
       </LanguageProvider>
     </AuthContext.Provider>
   );

@@ -129,6 +129,30 @@ router.get('/', verifyToken, async (req, res) => {
   }
 });
 
+// Get single user full profile details
+router.get('/profile/:id', verifyToken, async (req, res) => {
+  try {
+    const { data: user, error } = await supabase
+      .from('users')
+      .select('id, username, email, age, gender, country, birthday, profileSongUrl, statusVideoUrl, created_at')
+      .eq('id', req.params.id)
+      .maybeSingle();
+
+    if (error || !user) {
+      return res.status(404).json({ msg: 'User not found' });
+    }
+
+    if (isStoryExpired(user.statusVideoUrl)) {
+      user.statusVideoUrl = null;
+    }
+
+    res.json(user);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send('Server error');
+  }
+});
+
 // Send a friend request
 router.post('/friend-request/:id', verifyToken, async (req, res) => {
   try {
@@ -495,6 +519,13 @@ router.delete('/me', verifyToken, async (req, res) => {
       console.error('Delete Error:', error);
       return res.status(500).json({ msg: 'Failed to delete account.' });
     }
+
+    try {
+      await supabase.auth.admin.deleteUser(req.user.id);
+    } catch (authDelErr) {
+      console.warn('Supabase Auth user delete error:', authDelErr);
+    }
+
     res.json({ msg: 'Account deleted successfully' });
   } catch (err) {
     console.error(err);

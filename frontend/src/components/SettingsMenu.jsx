@@ -1,7 +1,7 @@
 import React from 'react';
 import './SettingsMenu.css';
 
-function SettingsMenu({ onClose, onOpenAccount, onOpenNotifications, onOpenPrivacy, onOpenLanguage }) {
+function SettingsMenu({ onClose, onOpenAccount, onOpenNotifications, onOpenPrivacy, onOpenLanguage, onCheckUpdate }) {
   return (
     <div className="settings-modal-overlay" onClick={onClose}>
       <div className="settings-modal-content" onClick={e => e.stopPropagation()}>
@@ -42,12 +42,14 @@ function SettingsMenu({ onClose, onOpenAccount, onOpenNotifications, onOpenPriva
             <div className="settings-item-title">Help & Feedback</div>
           </div>
           
-          <div className="settings-item">
-            <div className="settings-item-title">Check update</div>
+          <div className="settings-item" onClick={onCheckUpdate} style={{ cursor: 'pointer' }}>
+            <div className="settings-item-title" style={{ color: '#818cf8', fontWeight: 600 }}>🚀 Check for updates</div>
+            <div className="settings-item-subtitle">v2.4.0 available</div>
           </div>
           
-          <div className="settings-item">
-            <div className="settings-item-title">About</div>
+          <div className="settings-item" onClick={onCheckUpdate}>
+            <div className="settings-item-title">About Chit Chat Telugu</div>
+            <div className="settings-item-subtitle">v2.4.0</div>
           </div>
         </div>
       </div>

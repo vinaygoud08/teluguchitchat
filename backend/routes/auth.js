@@ -37,7 +37,7 @@ router.post('/register', async (req, res) => {
       return res.status(400).json({ msg: 'You must be at least 18 years old to register.' });
     }
 
-    // Check if user exists
+    // Check if user exists in public.users
     const { data: existingUser } = await supabase
       .from('users')
       .select('id')
@@ -45,17 +45,52 @@ router.post('/register', async (req, res) => {
       .maybeSingle();
 
     if (existingUser) {
-      return res.status(400).json({ msg: 'User already exists' });
+      return res.status(400).json({ msg: 'User with this email already exists' });
     }
 
-    // Hash password
+    // 1. Create User in Supabase Authentication (auth.users)
+    let authUserId = null;
+    try {
+      const { data: authData, error: authError } = await supabase.auth.admin.createUser({
+        email: email,
+        password: password,
+        email_confirm: true,
+        user_metadata: {
+          username: username,
+          gender: gender,
+          age: age,
+          country: country
+        }
+      });
+
+      if (authError) {
+        console.warn('Supabase Auth createUser warning:', authError.message);
+        if (authError.message && (authError.message.includes('already') || authError.message.includes('exists'))) {
+          // If already in auth.users, check if we can retrieve the user id
+          const { data: listData } = await supabase.auth.admin.listUsers();
+          const found = (listData?.users || []).find(u => u.email?.toLowerCase() === email.toLowerCase());
+          if (found) {
+            authUserId = found.id;
+          } else {
+            return res.status(400).json({ msg: 'User with this email is already registered in Authentication.' });
+          }
+        }
+      } else if (authData && authData.user) {
+        authUserId = authData.user.id;
+      }
+    } catch (authErr) {
+      console.error('Error creating user in Supabase auth:', authErr);
+    }
+
+    // 2. Hash password for local authentication verification
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
     const verificationToken = crypto.randomBytes(32).toString('hex');
+    const finalUserId = authUserId || crypto.randomUUID();
 
-    // Create user
+    // 3. Create user profile in public.users table
     const newUser = {
-      id: crypto.randomUUID(), // Generate UUID for the user
+      id: finalUserId,
       username,
       email,
       password: hashedPassword,
@@ -63,7 +98,7 @@ router.post('/register', async (req, res) => {
       birthday: birthday || null,
       country: country || null,
       gender,
-      is_verified: false,
+      is_verified: true, // Auto-verified since auth user was created
       verification_token: verificationToken
     };
 
@@ -76,15 +111,14 @@ router.post('/register', async (req, res) => {
       return res.status(500).json({ msg: 'Server error saving profile data.' });
     }
 
-    // Send verification email
+    // Send optional verification / welcome email
     try {
       await sendVerificationEmail(email, verificationToken);
     } catch (emailError) {
       console.error('Failed to send verification email:', emailError);
-      // Still succeed the registration, but maybe warn
     }
 
-    res.status(201).json({ msg: 'Registration successful! Please check your email to verify your account.' });
+    res.status(201).json({ msg: 'Registration successful! You can now log in.' });
   } catch (err) {
     console.error(err.message);
     res.status(500).json({ msg: err.message || 'Server error' });
@@ -270,6 +304,13 @@ router.post('/reset-password', async (req, res) => {
     if (updateError) {
       console.error('Update Password Error:', updateError.message);
       return res.status(500).json({ msg: 'Server error' });
+    }
+
+    // Sync new password to Supabase Auth admin
+    try {
+      await supabase.auth.admin.updateUserById(user.id, { password: password });
+    } catch (authSyncErr) {
+      console.warn('Supabase auth password update error:', authSyncErr);
     }
 
     res.json({ msg: 'Password successfully reset. You can now log in.' });

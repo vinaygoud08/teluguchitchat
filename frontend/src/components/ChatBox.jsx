@@ -6,6 +6,7 @@ import { User, UserRound, CircleUser, Phone, Video } from 'lucide-react';
 import Avatar from './Avatar';
 import GroupInfoModal from './GroupInfoModal';
 import ImageViewerModal from './ImageViewerModal';
+import ProfileViewer from './ProfileViewer';
 import { decryptMessage } from '../utils/crypto';
 
 // Inline warning modal
@@ -25,7 +26,7 @@ const RestartWarningModal = ({ onConfirm, onCancel }) => (
   </div>
 );
 
-const MessageItem = memo(({ msg, isSelf, senderColor, senderIcon, onImageClick, onContextMenu }) => {
+const MessageItem = memo(({ msg, isSelf, senderUser, senderColor, senderIcon, onImageClick, onContextMenu, onProfileClick }) => {
   const [viewing, setViewing] = useState(false);
   const [timeLeft, setTimeLeft] = useState(5);
   
@@ -58,80 +59,114 @@ const MessageItem = memo(({ msg, isSelf, senderColor, senderIcon, onImageClick, 
     msg.text.startsWith('📞') || msg.text.startsWith('❌') || msg.text.includes('Voice Call') || msg.text.startsWith('📢')
   );
 
+  const handleUserClick = () => {
+    if (onProfileClick && !isSelf && !isSystemMsg) {
+      onProfileClick(senderUser || { username: msg.sender, id: msg.senderId });
+    }
+  };
+
+  if (isSystemMsg) {
+    return (
+      <div className="message system">
+        <div className="message-content">
+          {msg.text}
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className={`message ${isSystemMsg ? 'system' : isSelf ? 'self' : 'other'}`}>
-      {!isSelf && !isSystemMsg && (
-        <div className="message-sender" style={senderColor ? { color: senderColor, display: 'flex', alignItems: 'center', gap: '4px' } : { display: 'flex', alignItems: 'center', gap: '4px' }}>
-          {senderIcon === 'male' && <User size={14} color={senderColor} />}
-          {senderIcon === 'female' && <UserRound size={14} color={senderColor} />}
-          {senderIcon === 'other' && <CircleUser size={14} color={senderColor} />}
-          {msg.sender}
+    <div className={`message-row ${isSelf ? 'self' : 'other'}`}>
+      {!isSelf && (
+        <div 
+          className="message-avatar-btn" 
+          onClick={handleUserClick} 
+          title={`Click to view ${msg.sender}'s profile`}
+          style={{ cursor: 'pointer' }}
+        >
+          <Avatar userId={senderUser?.id || senderUser?._id || msg.senderId} username={msg.sender} size={32} />
         </div>
       )}
-      <div 
-        className="message-content" 
-        onContextMenu={(e) => {
-          e.preventDefault();
-          if (onContextMenu) onContextMenu(e, msg);
-        }}
-        style={{ cursor: 'pointer' }}
-      >
-        {msg.reply_to && (
-          <div style={{ background: 'rgba(0,0,0,0.1)', padding: '5px', borderRadius: '5px', marginBottom: '5px', fontSize: '0.85em', borderLeft: '3px solid #2196F3' }}>
-            <strong style={{ color: '#2196F3' }}>{msg.reply_to.sender}</strong>
-            {msg.reply_to.imageUrl && <div style={{display:'flex', alignItems:'center', gap:'5px'}}><span>📷 Photo</span><img src={msg.reply_to.imageUrl} style={{width:'30px', height:'30px', borderRadius:'4px', objectFit:'cover'}} /></div>}
-            {msg.reply_to.text && <div>{msg.reply_to.text.length > 30 ? msg.reply_to.text.substring(0,30)+'...' : msg.reply_to.text}</div>}
+
+      <div className={`message ${isSelf ? 'self' : 'other'}`}>
+        {!isSelf && (
+          <div 
+            className="message-sender" 
+            onClick={handleUserClick}
+            style={senderColor ? { color: senderColor, display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' } : { display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}
+            title={`View ${msg.sender}'s profile`}
+          >
+            {senderIcon === 'male' && <User size={14} color={senderColor} />}
+            {senderIcon === 'female' && <UserRound size={14} color={senderColor} />}
+            {senderIcon === 'other' && <CircleUser size={14} color={senderColor} />}
+            {msg.sender}
           </div>
         )}
-        {msg.text && <div>{msg.text}</div>}
-        
-        {msg.imageUrl && !msg.viewOnce && (
-          <img 
-            src={msg.imageUrl} 
-            alt="attached" 
-            className="message-img" 
-            onClick={() => onImageClick && onImageClick(msg.imageUrl)}
-          />
-        )}
-        
-        {msg.imageUrl && msg.viewOnce && !isSelf && (
-          <div className="view-once-container">
-            {isViewed ? (
-              <div className="viewed-notice" style={{ fontStyle: 'italic', color: '#888', fontSize: '0.85rem' }}>
-                👁️ Photo Opened
-              </div>
-            ) : viewing ? (
-              <div className="viewing-container" style={{ position: 'relative' }}>
-                <img src={msg.imageUrl} alt="view once" className="message-img" />
-                <div className="timer-badge" style={{ position: 'absolute', top: 5, right: 5, background: 'rgba(0,0,0,0.6)', color: 'white', padding: '2px 8px', borderRadius: '10px', fontSize: '0.8rem' }}>
-                  {timeLeft}s
+        <div 
+          className="message-content" 
+          onContextMenu={(e) => {
+            e.preventDefault();
+            if (onContextMenu) onContextMenu(e, msg);
+          }}
+          style={{ cursor: 'pointer' }}
+        >
+          {msg.reply_to && (
+            <div style={{ background: 'rgba(0,0,0,0.1)', padding: '5px', borderRadius: '5px', marginBottom: '5px', fontSize: '0.85em', borderLeft: '3px solid #2196F3' }}>
+              <strong style={{ color: '#2196F3' }}>{msg.reply_to.sender}</strong>
+              {msg.reply_to.imageUrl && <div style={{display:'flex', alignItems:'center', gap:'5px'}}><span>📷 Photo</span><img src={msg.reply_to.imageUrl} style={{width:'30px', height:'30px', borderRadius:'4px', objectFit:'cover'}} /></div>}
+              {msg.reply_to.text && <div>{msg.reply_to.text.length > 30 ? msg.reply_to.text.substring(0,30)+'...' : msg.reply_to.text}</div>}
+            </div>
+          )}
+          {msg.text && <div className="message-text">{msg.text}</div>}
+          
+          {msg.imageUrl && !msg.viewOnce && (
+            <img 
+              src={msg.imageUrl} 
+              alt="attached" 
+              className="message-img" 
+              onClick={() => onImageClick && onImageClick(msg.imageUrl)}
+            />
+          )}
+          
+          {msg.imageUrl && msg.viewOnce && !isSelf && (
+            <div className="view-once-container">
+              {isViewed ? (
+                <div className="viewed-notice" style={{ fontStyle: 'italic', color: '#888', fontSize: '0.85rem' }}>
+                  👁️ Photo Opened
                 </div>
-              </div>
-            ) : (
-              <button 
-                onClick={handleView}
-                style={{ background: '#e91e63', color: 'white', border: 'none', padding: '6px 12px', borderRadius: '16px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}
-              >
-                Tap to View 📸
-              </button>
-            )}
-          </div>
-        )}
+              ) : viewing ? (
+                <div className="viewing-container" style={{ position: 'relative' }}>
+                  <img src={msg.imageUrl} alt="view once" className="message-img" />
+                  <div className="timer-badge" style={{ position: 'absolute', top: 5, right: 5, background: 'rgba(0,0,0,0.6)', color: 'white', padding: '2px 8px', borderRadius: '10px', fontSize: '0.8rem' }}>
+                    {timeLeft}s
+                  </div>
+                </div>
+              ) : (
+                <button 
+                  onClick={handleView}
+                  style={{ background: '#e91e63', color: 'white', border: 'none', padding: '6px 12px', borderRadius: '16px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}
+                >
+                  Tap to View 📸
+                </button>
+              )}
+            </div>
+          )}
 
-        {msg.imageUrl && msg.viewOnce && isSelf && (
-          <div className="viewed-notice" style={{ fontStyle: 'italic', color: '#888', fontSize: '0.85rem' }}>
-            👁️ View Once Photo Sent
-          </div>
-        )}
+          {msg.imageUrl && msg.viewOnce && isSelf && (
+            <div className="viewed-notice" style={{ fontStyle: 'italic', color: '#888', fontSize: '0.85rem' }}>
+              👁️ View Once Photo Sent
+            </div>
+          )}
 
-        {msg.gifUrl && <img src={msg.gifUrl} alt="gif" className="message-img" />}
-        {msg.stickerUrl && (
-          <img src={msg.stickerUrl} alt="sticker" className="message-img"
-            style={{ background: 'transparent', maxWidth: '150px' }} />
-        )}
-        {!isSystemMsg && timeStr && (
-          <span className="message-time">{timeStr}</span>
-        )}
+          {msg.gifUrl && <img src={msg.gifUrl} alt="gif" className="message-img" />}
+          {msg.stickerUrl && (
+            <img src={msg.stickerUrl} alt="sticker" className="message-img"
+              style={{ background: 'transparent', maxWidth: '150px' }} />
+          )}
+          {!isSystemMsg && timeStr && (
+            <span className="message-time">{timeStr}</span>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -146,6 +181,7 @@ const ChatBox = ({ socket, activeChat, onInitiateCall, users = [], myGroups = []
   const [pendingCall, setPendingCall] = useState(null);
   const [isClearing, setIsClearing] = useState(false);
   const [viewingImage, setViewingImage] = useState(null);
+  const [viewingProfile, setViewingProfile] = useState(null);
   
   // Context Menu & Replies
   const [contextMenu, setContextMenu] = useState(null);
@@ -187,9 +223,14 @@ const ChatBox = ({ socket, activeChat, onInitiateCall, users = [], myGroups = []
       
       if (otherId) {
         if (data.text && data.text.startsWith('E2EE:') && user) {
-          const privateKey = localStorage.getItem(`privateKey_${user.id}`);
+          const uId = user.id || user._id;
+          const privateKey = localStorage.getItem(`privateKey_${uId}`);
           if (privateKey) {
-             data.text = await decryptMessage(data.text, privateKey);
+            try {
+              data.text = await decryptMessage(data.text, privateKey);
+            } catch (decErr) {
+              console.warn("Could not decrypt message with current key:", decErr);
+            }
           }
         }
         setMessages(prev => {
@@ -277,11 +318,16 @@ const ChatBox = ({ socket, activeChat, onInitiateCall, users = [], myGroups = []
         
         let messagesData = res.data;
         if (!activeGroup && user) {
-          const privateKey = localStorage.getItem(`privateKey_${user.id}`);
+          const uId = user.id || user._id;
+          const privateKey = localStorage.getItem(`privateKey_${uId}`);
           if (privateKey) {
             messagesData = await Promise.all(messagesData.map(async m => {
               if (m.text && m.text.startsWith('E2EE:')) {
-                return { ...m, text: await decryptMessage(m.text, privateKey) };
+                try {
+                  return { ...m, text: await decryptMessage(m.text, privateKey) };
+                } catch (e) {
+                  return m;
+                }
               }
               return m;
             }));
@@ -328,8 +374,6 @@ const ChatBox = ({ socket, activeChat, onInitiateCall, users = [], myGroups = []
     }
   };
 
-  const currentMessages = messages[activeChat] || [];
-
   const handleAddStranger = async () => {
     const targetId = strangerUserIds?.[activeChat];
     if (!targetId) return;
@@ -348,6 +392,8 @@ const ChatBox = ({ socket, activeChat, onInitiateCall, users = [], myGroups = []
     setStrangerLeft(true);
     if (onBackToSidebar) onBackToSidebar();
   };
+
+  const currentMessages = messages[activeChat] || [];
 
   const renderHeader = () => {
     return (
@@ -393,11 +439,11 @@ const ChatBox = ({ socket, activeChat, onInitiateCall, users = [], myGroups = []
             </>
           ) : otherUser ? (
             <>
-              <div style={{ position: 'relative', width: 40, height: 40 }}>
+              <div style={{ position: 'relative', width: 40, height: 40, cursor: 'pointer' }} onClick={() => setViewingProfile(otherUser)}>
                 <Avatar userId={otherUser.id || otherUser._id} username={otherUser.username} size={40} />
                 {otherIsOnline ? <span className="online-dot" /> : <span className="offline-dot" />}
               </div>
-              <div className="chat-header-info">
+              <div className="chat-header-info" style={{ cursor: 'pointer' }} onClick={() => setViewingProfile(otherUser)}>
                 <h2>{otherUser.username}</h2>
                 <span className={`status-text ${otherIsOnline ? 'online' : 'offline'}`}>
                   {otherIsOnline ? 'Online' : 'Offline'}
@@ -423,7 +469,6 @@ const ChatBox = ({ socket, activeChat, onInitiateCall, users = [], myGroups = []
             <>
               <button className="chat-header-btn" onClick={() => setPendingCall('audio')} title="Voice Call"><Phone size={20} /></button>
               <button className="chat-header-btn" onClick={() => setPendingCall('video')} title="Video Call"><Video size={20} /></button>
-              <button className="chat-header-btn restart-btn" onClick={() => setShowRestartWarning(true)}>🔄 Restart Chat</button>
             </>
           ) : null}
         </div>
@@ -487,8 +532,9 @@ const ChatBox = ({ socket, activeChat, onInitiateCall, users = [], myGroups = []
           const isSelf = user && msg.sender === user.username;
           let senderColor = '#333'; // default black/dark-gray for 'other'
           let senderIcon = 'other';
+          let senderInfo = null;
           if (!isSelf && msg.sender) {
-            const senderInfo = users.find(u => u.username === msg.sender);
+            senderInfo = users.find(u => u.username === msg.sender || (u.id || u._id) === msg.senderId);
             if (senderInfo) {
               const g = senderInfo.gender ? senderInfo.gender.toLowerCase() : '';
               if (g === 'male') {
@@ -512,9 +558,14 @@ const ChatBox = ({ socket, activeChat, onInitiateCall, users = [], myGroups = []
               key={msg.id || idx} 
               msg={msgToPass} 
               isSelf={isSelf} 
+              senderUser={senderInfo}
               senderColor={senderColor} 
               senderIcon={senderIcon} 
               onImageClick={setViewingImage} 
+              onProfileClick={(profile) => {
+                if (isStrangerChat) return;
+                setViewingProfile(profile);
+              }}
               onContextMenu={(e, messageObj) => {
                 setContextMenu({
                   x: e.clientX,
@@ -724,6 +775,13 @@ const ChatBox = ({ socket, activeChat, onInitiateCall, users = [], myGroups = []
             </div>
           </div>
         </div>
+      )}
+
+      {viewingProfile && (
+        <ProfileViewer 
+          userProfile={viewingProfile} 
+          onClose={() => setViewingProfile(null)} 
+        />
       )}
     </div>
   );

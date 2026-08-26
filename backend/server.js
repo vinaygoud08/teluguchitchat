@@ -8,7 +8,10 @@ const path = require('path');
 dotenv.config();
 
 const app = express();
-app.use(cors());
+app.use(cors({
+  origin: '*',
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']
+}));
 app.use(express.json());
 
 const server = http.createServer(app);
@@ -16,7 +19,7 @@ const server = http.createServer(app);
 const FRONTEND_URL = process.env.FRONTEND_URL || '*';
 const io = new Server(server, {
   cors: {
-    origin: FRONTEND_URL,
+    origin: '*',
     methods: ['GET', 'POST']
   }
 });
@@ -32,6 +35,8 @@ app.use('/api/auth', require('./routes/auth'));
 app.use('/api/messages', require('./routes/messages'));
 app.use('/api/media', require('./routes/media'));
 app.use('/api/groups', require('./routes/groups'));
+app.use('/api/ai', require('./routes/ai'));
+app.use('/api/version', require('./routes/version'));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // Socket.io logic

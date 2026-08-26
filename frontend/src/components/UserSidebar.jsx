@@ -9,7 +9,7 @@ import StoryViewerModal from './StoryViewerModal';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
 
-const UserSidebar = ({ activeChat, setActiveChat, users, onlineUsers = new Set(), mobileSidebarOpen = true, socket, isSearchingStranger, setIsSearchingStranger, myGroups, setMyGroups, unreadCounts = {} }) => {
+const UserSidebar = ({ activeChat, setActiveChat, users, setUsers, onlineUsers = new Set(), mobileSidebarOpen = true, socket, isSearchingStranger, setIsSearchingStranger, myGroups, setMyGroups, unreadCounts = {} }) => {
   const { user, token, setUser } = useAuth();
   const { t } = useLanguage();
   const [activeTab, setActiveTab] = useState('chats'); // 'chats', 'friends', 'requests', 'groups', 'stories'
@@ -24,10 +24,56 @@ const UserSidebar = ({ activeChat, setActiveChat, users, onlineUsers = new Set()
 
   const friends = user?.friends || [];
   const [friendRequests, setFriendRequests] = useState(user?.friendRequests || []);
+  const [recentConversations, setRecentConversations] = useState({});
 
   useEffect(() => {
     setFriendRequests(user?.friendRequests || []);
   }, [user?.friendRequests]);
+
+  useEffect(() => {
+    if (!token || !user) return;
+
+    const fetchRecentConversations = async () => {
+      try {
+        const res = await axios.get('/api/messages/recent/conversations', {
+          headers: { 'x-auth-token': token }
+        });
+        if (res.data) {
+          setRecentConversations(res.data);
+        }
+      } catch (err) {
+        console.error('Error fetching recent conversations:', err);
+      }
+    };
+
+    fetchRecentConversations();
+
+    const handleNewMessage = (data) => {
+      const myId = user.id || user._id;
+      const otherId = (data.room && data.room.startsWith('stranger_'))
+        ? null
+        : (data.senderId === myId ? data.recipientId : data.senderId);
+
+      if (otherId) {
+        setRecentConversations(prev => ({
+          ...prev,
+          [otherId]: {
+            lastMessageTime: data.timestamp || new Date().toISOString(),
+            lastMessageText: data.text || (data.imageUrl ? '📷 Photo' : (data.fileUrl ? '📁 File' : (data.stickerUrl ? '🎨 Sticker' : 'Message')))
+          }
+        }));
+      }
+    };
+
+    if (socket) {
+      socket.on('receive_private_message', handleNewMessage);
+    }
+    return () => {
+      if (socket) {
+        socket.off('receive_private_message', handleNewMessage);
+      }
+    };
+  }, [token, user, socket]);
 
   const handleFriendAction = async (action, targetId) => {
     try {
@@ -38,7 +84,15 @@ const UserSidebar = ({ activeChat, setActiveChat, users, onlineUsers = new Set()
         socket.emit('send_friend_request', { senderId: user.id || user._id, targetId });
         alert("Friend request sent!");
       } else {
-        window.location.reload();
+        const meRes = await axios.get('/api/users/me', { headers: { 'x-auth-token': token } });
+        if (meRes.data && setUser) {
+          setUser(meRes.data);
+          localStorage.setItem('user', JSON.stringify(meRes.data));
+        }
+        const usersRes = await axios.get('/api/users', { headers: { 'x-auth-token': token } });
+        if (usersRes.data && setUsers) {
+          setUsers(usersRes.data);
+        }
       }
     } catch (err) {
       console.error(err);
@@ -109,6 +163,17 @@ const UserSidebar = ({ activeChat, setActiveChat, users, onlineUsers = new Set()
   const filteredFriends = friends.filter(u =>
     u.username.toLowerCase().includes(search.toLowerCase())
   );
+
+  const sortedFriends = [...filteredFriends].sort((a, b) => {
+    const aId = a.id || a._id;
+    const bId = b.id || b._id;
+    const aTime = recentConversations[aId]?.lastMessageTime ? new Date(recentConversations[aId].lastMessageTime).getTime() : 0;
+    const bTime = recentConversations[bId]?.lastMessageTime ? new Date(recentConversations[bId].lastMessageTime).getTime() : 0;
+    if (bTime !== aTime) {
+      return bTime - aTime;
+    }
+    return (a.username || '').localeCompare(b.username || '');
+  });
 
   const searchedUsers = users.filter(u => {
     if (!search) return false;
@@ -226,16 +291,22 @@ const UserSidebar = ({ activeChat, setActiveChat, users, onlineUsers = new Set()
                       : 'No results for "' + search + '"'}
                   </div>
                 )}
-                {filteredFriends.map(u => {
-                  const isOnline = onlineUsers.has(u.id || u._id);
+                {sortedFriends.map(u => {
+                  const uId = u.id || u._id;
+                  const isOnline = onlineUsers.has(uId);
+                  const lastChat = recentConversations[uId];
+                  const timeFormatted = lastChat?.lastMessageTime
+                    ? new Date(lastChat.lastMessageTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                    : '';
+
                   return (
                     <div
-                      key={u.id || u._id}
-                      className={`sidebar-item ${activeChat === (u.id || u._id) ? 'active' : ''}`}
-                      onClick={() => setActiveChat(u.id || u._id)}
+                      key={uId}
+                      className={`sidebar-item ${activeChat === uId ? 'active' : ''}`}
+                      onClick={() => setActiveChat(uId)}
                     >
                       <div style={{ position: 'relative' }}>
-                        <Avatar userId={u.id || u._id} username={u.username} size={44} />
+                        <Avatar userId={uId} username={u.username} size={44} />
                         {isOnline
                           ? <span className="online-dot" />
                           : <span className="offline-dot" />
@@ -247,20 +318,27 @@ const UserSidebar = ({ activeChat, setActiveChat, users, onlineUsers = new Set()
                             <span className="sidebar-item-name">{u.username}</span>
                             {u.profileSongUrl && <span title="Has profile song" style={{ fontSize: '0.7rem', marginLeft: 4 }}>🎵</span>}
                           </div>
-                          {unreadCounts[u.id || u._id] > 0 && (
-                            <div style={{
-                              background: '#25d366', color: 'white', borderRadius: '10px',
-                              padding: '2px 6px', fontSize: '0.7rem', fontWeight: 'bold'
-                            }}>
-                              {unreadCounts[u.id || u._id] > 9 ? '9+' : unreadCounts[u.id || u._id]}
-                            </div>
-                          )}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            {timeFormatted && (
+                              <span style={{ fontSize: '0.7rem', color: '#8e8ea0' }}>{timeFormatted}</span>
+                            )}
+                            {unreadCounts[uId] > 0 && (
+                              <div style={{
+                                background: '#25d366', color: 'white', borderRadius: '10px',
+                                padding: '2px 6px', fontSize: '0.7rem', fontWeight: 'bold'
+                              }}>
+                                {unreadCounts[uId] > 9 ? '9+' : unreadCounts[uId]}
+                              </div>
+                            )}
+                          </div>
                         </div>
-                        <div className="sidebar-item-status">
-                          <span className={isOnline ? 'status-online' : ''}>
-                            {isOnline ? 'Online' : 'Offline'}
+                        <div className="sidebar-item-status" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span className={isOnline ? 'status-online' : ''} style={{ textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap', maxWidth: '180px' }}>
+                            {lastChat?.lastMessageText 
+                              ? (lastChat.lastMessageText.startsWith('E2EE:') ? '🔒 Encrypted message' : (lastChat.lastMessageText.startsWith('📞') || lastChat.lastMessageText.startsWith('❌') ? lastChat.lastMessageText : lastChat.lastMessageText)) 
+                              : (isOnline ? 'Online' : 'Offline')}
                           </span>
-                          {u.statusVideoUrl && <span>📹 Status</span>}
+                          {u.statusVideoUrl && <span style={{ fontSize: '0.75rem', flexShrink: 0 }}>📹 Status</span>}
                         </div>
                       </div>
                     </div>
