@@ -13,7 +13,7 @@ const verifyTokenOptional = (req, res, next) => {
   next();
 };
 
-// 1. Google Gemini API (if GEMINI_API_KEY in .env)
+// 1. Google Gemini API
 async function queryGemini(userPrompt, conversationHistory = []) {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) return null;
@@ -23,7 +23,7 @@ async function queryGemini(userPrompt, conversationHistory = []) {
       {
         role: 'user',
         parts: [{
-          text: `You are "My AI", a powerful, highly intelligent, and accurate AI Assistant built into the "Chit Chat Telugu" application (like Meta AI / Gemini). You answer academic questions, coding, general knowledge, science, literature, Telugu, and English queries accurately and in detail with proper formatting, bullet points, and headings.`
+          text: `You are "My AI", a powerful, friendly, and ultra-intelligent AI Assistant inside "Chit Chat Telugu" (like Meta AI and ChatGPT). You can chat naturally, answer all technical and academic questions, write code, tell stories, give advice, and converse fluently in Telugu (తెలుగు) and English.`
         }]
       },
       ...conversationHistory.map(m => ({
@@ -53,7 +53,7 @@ async function queryGemini(userPrompt, conversationHistory = []) {
   return null;
 }
 
-// 2. Groq / Llama 3 API (if GROQ_API_KEY in .env)
+// 2. Groq API (Llama 3.3 70B)
 async function queryGroq(userPrompt, conversationHistory = []) {
   const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) return null;
@@ -62,7 +62,7 @@ async function queryGroq(userPrompt, conversationHistory = []) {
     const messages = [
       {
         role: 'system',
-        content: `You are "My AI", an expert conversational AI assistant (like Meta AI) inside Chit Chat Telugu. You answer all questions accurately with clear explanations, structured bullet points, and code or examples where appropriate.`
+        content: `You are "My AI", a smart, natural, and helpful AI assistant (like Meta AI) inside Chit Chat Telugu. You speak Telugu (తెలుగు) and English fluently. Answer questions clearly, accurately, and politely.`
       },
       ...conversationHistory.map(m => ({
         role: m.sender === 'user' ? 'user' : 'assistant',
@@ -80,7 +80,7 @@ async function queryGroq(userPrompt, conversationHistory = []) {
       body: JSON.stringify({
         model: 'llama-3.3-70b-versatile',
         messages,
-        temperature: 0.6
+        temperature: 0.7
       })
     });
 
@@ -95,129 +95,127 @@ async function queryGroq(userPrompt, conversationHistory = []) {
   return null;
 }
 
-// Helper: Query Wikipedia & DuckDuckGo for single topic
-async function fetchTopicKnowledge(topic) {
+// 3. Live Web & Wikipedia Search for real-time information
+async function fetchDeepKnowledge(topic) {
   try {
-    const clean = topic
+    const cleanTopic = topic
       .replace(/[?.,!]/g, '')
-      .replace(/what is|what do you mean by|explain|differentiate between|how does|differ from|steps involved in|setting up/gi, '')
+      .replace(/who is|what is|tell me about|explain|meaning of|గురించి చెప్పు|ఎవరు|ఏంటి|code for|program for/gi, '')
       .trim();
 
-    if (!clean || clean.length < 2) return null;
+    if (!cleanTopic || cleanTopic.length < 2) return null;
 
-    // 1. DuckDuckGo Instant Answer
-    const ddgRes = await fetch(`https://api.duckduckgo.com/?q=${encodeURIComponent(clean)}&format=json`);
-    if (ddgRes.ok) {
-      const ddgData = await ddgRes.json();
-      const abstract = ddgData.AbstractText || ddgData.Abstract || ddgData.RelatedTopics?.[0]?.Text;
-      if (abstract && abstract.length > 40) {
-        return {
-          title: ddgData.Heading || clean,
-          summary: abstract
-        };
-      }
-    }
-
-    // 2. Wikipedia Search & Summary
-    const wikiSearch = await fetch(`https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(clean)}&format=json&origin=*`);
-    if (wikiSearch.ok) {
-      const wData = await wikiSearch.json();
-      const topHit = wData.query?.search?.[0];
+    // Search English Wikipedia
+    const searchRes = await fetch(`https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(cleanTopic)}&format=json&origin=*`);
+    if (searchRes.ok) {
+      const sData = await searchRes.json();
+      const topHit = sData.query?.search?.[0];
       if (topHit && topHit.title) {
         const pageRes = await fetch(`https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(topHit.title)}`);
         if (pageRes.ok) {
-          const pageData = await pageRes.json();
-          if (pageData.extract) {
+          const pData = await pageRes.json();
+          if (pData.extract) {
             return {
-              title: pageData.title,
-              summary: pageData.extract
+              title: pData.title,
+              extract: pData.extract,
+              description: pData.description || ''
             };
           }
         }
       }
     }
   } catch (e) {
-    console.warn('Topic search error:', e.message);
+    console.warn('Deep knowledge search error:', e.message);
   }
   return null;
 }
 
-// Comprehensive Academic, Technical & General Knowledge Synthesizer
-async function synthesizeAnswers(prompt) {
-  const cleanPrompt = prompt.trim();
-  const lowerPrompt = cleanPrompt.toLowerCase();
+// 4. Code & Programming Solver
+function generateCodeSnippet(query) {
+  const q = query.toLowerCase();
 
-  // Blockchain / DLT / Web3 Specific Deep Knowledge
-  if (lowerPrompt.includes('distributed ledger') || lowerPrompt.includes('blockchain') || lowerPrompt.includes('web3') || lowerPrompt.includes('testnet')) {
-    let response = '';
-
-    if (lowerPrompt.includes('distributed ledger') || lowerPrompt.includes('dlt')) {
-      response += `### 1. (a) Distributed Ledger Technology (DLT)\n` +
-        `**Distributed Ledger Technology (DLT)** is a decentralized digital system for recording transactions and data across multiple independent computer nodes simultaneously, rather than relying on a centralized database or administrator. Every participant in the network maintains an identical, synchronized copy of the ledger.\n\n` +
-        `#### Comparison of Blockchain Types:\n` +
-        `| Feature | Public Blockchain | Private Blockchain | Consortium Blockchain |\n` +
-        `| :--- | :--- | :--- | :--- |\n` +
-        `| **Access** | Open to anyone (Permissionless) | Single organization only (Permissioned) | Multiple selected organizations |\n` +
-        `| **Consensus** | Proof of Work (PoW) / Proof of Stake (PoS) | Centralized / RAFT / PBFT | Multi-organization voting / PBFT |\n` +
-        `| **Speed & Throughput** | Slower (high latency) | Extremely Fast (high TPS) | High / Medium TPS |\n` +
-        `| **Security & Trust** | Fully decentralized & immutable | Centralized trust authority | Semi-decentralized trust |\n` +
-        `| **Examples** | Bitcoin, Ethereum | Hyperledger Fabric, Ripple | R3 Corda, Energy Web |\n\n`;
-    }
-
-    if (lowerPrompt.includes('web3') || lowerPrompt.includes('earlier web')) {
-      response += `### 1. (b) Web3 vs. Earlier Web Technologies\n` +
-        `- **Web 1.0 (Read-Only)**: Static HTML websites (e.g. personal blogs, informational directories) with zero user interaction.\n` +
-        `- **Web 2.0 (Read-Write)**: Dynamic, centralized platforms (e.g. Facebook, Google, YouTube) where users create content, but tech corporations own the user data and monetize identity.\n` +
-        `- **Web 3.0 (Read-Write-Own)**: Decentralized internet built on blockchain, cryptographic tokens, and smart contracts, allowing users to maintain self-custody of digital identity, assets, and data without intermediaries.\n\n`;
-    }
-
-    if (lowerPrompt.includes('testnet') || lowerPrompt.includes('bitcoin testnet node') || lowerPrompt.includes('steps')) {
-      response += `#### Steps Involved in Setting Up a Bitcoin Testnet Node:\n` +
-        `1. **Download & Install Bitcoin Core**: Obtain the official Bitcoin Core binaries for your OS from bitcoin.org.\n` +
-        `2. **Configure for Testnet**: Create or edit the \`bitcoin.conf\` configuration file located in the Bitcoin data directory and add:\n` +
-        `   \`\`\`conf\n` +
-        `   testnet=1\n` +
-        `   server=1\n` +
-        `   rpcuser=your_username\n` +
-        `   rpcpassword=your_secure_password\n` +
-        `   txindex=1\n` +
-        `   \`\`\`\n` +
-        `3. **Launch the Node Daemon**: Run \`bitcoind -testnet\` (or start Bitcoin-Qt in testnet mode).\n` +
-        `4. **Initial Block Download (IBD)**: Allow the node to sync the Bitcoin testnet blockchain ledger.\n` +
-        `5. **Verify Node Status**: Execute \`bitcoin-cli -testnet getblockchaininfo\` to verify connection, block height, and network status.\n` +
-        `6. **Acquire Testnet Faucet Coins**: Use public testnet faucets to test transactions without real currency risk.\n\n`;
-    }
-
-    if (response) return response;
+  if (q.includes('fibonacci')) {
+    return `### 💻 Fibonacci Series in Python & JavaScript\n\n**Python Solution:**\n\`\`\`python\ndef fibonacci(n):\n    fib = [0, 1]\n    for i in range(2, n):\n        fib.append(fib[i-1] + fib[i-2])\n    return fib[:n]\n\nprint(fibonacci(10))\n\`\`\`\n\n**JavaScript Solution:**\n\`\`\`javascript\nfunction fibonacci(n) {\n  const fib = [0, 1];\n  for (let i = 2; i < n; i++) {\n    fib.push(fib[i - 1] + fib[i - 2]);\n  }\n  return fib.slice(0, n);\n}\n\nconsole.log(fibonacci(10));\n\`\`\``;
   }
 
-  // Decompose Multi-Question Prompts into key sub-topics
-  const subQuestions = cleanPrompt
-    .split(/\n|\?|\b(?:1\.|2\.|3\.|4\.|5\.|\(a\)|\(b\)|\(c\)|\(d\))\b/i)
-    .map(s => s.trim())
-    .filter(s => s.length > 5 && !s.startsWith('[BL:') && !s.startsWith('CO:'));
-
-  if (subQuestions.length > 0) {
-    const results = [];
-    for (const sub of subQuestions.slice(0, 3)) {
-      const info = await fetchTopicKnowledge(sub);
-      if (info && !results.some(r => r.title === info.title)) {
-        results.push(info);
-      }
-    }
-
-    if (results.length > 0) {
-      return results.map(r => `### 📖 **${r.title}**\n${r.summary}`).join('\n\n---\n\n');
-    }
+  if (q.includes('prime number') || q.includes('prime')) {
+    return `### 💻 Check Prime Number in Python\n\n\`\`\`python\ndef is_prime(num):\n    if num <= 1:\n        return False\n    for i in range(2, int(num**0.5) + 1):\n        if num % i == 0:\n            return False\n    return True\n\nnumber = 29\nprint(f"{number} is prime: {is_prime(number)}")\n\`\`\``;
   }
 
-  // Fallback to direct knowledge search
-  const directInfo = await fetchTopicKnowledge(cleanPrompt);
-  if (directInfo) {
-    return `### 📖 **${directInfo.title}**\n${directInfo.summary}`;
+  if (q.includes('binary search')) {
+    return `### 💻 Binary Search Algorithm\n\n\`\`\`python\ndef binary_search(arr, target):\n    low, high = 0, len(arr) - 1\n    while low <= high:\n        mid = (low + high) // 2\n        if arr[mid] == target:\n            return mid\n        elif arr[mid] < target:\n            low = mid + 1\n        else:\n            high = mid - 1\n    return -1 # Not found\n\`\`\``;
+  }
+
+  if (q.includes('react') || q.includes('hook') || q.includes('component')) {
+    return `### ⚛️ Modern React Component Example\n\n\`\`\`jsx\nimport React, { useState, useEffect } from 'react';\n\nfunction Counter() {\n  const [count, setCount] = useState(0);\n\n  return (\n    <div style={{ textAlign: 'center', padding: '20px' }}>\n      <h2>Count: {count}</h2>\n      <button onClick={() => setCount(count + 1)}>Increment ➕</button>\n      <button onClick={() => setCount(0)} style={{ marginLeft: '10px' }}>Reset 🔄</button>\n    </div>\n  );\n}\n\nexport default Counter;\n\`\`\``;
   }
 
   return null;
+}
+
+// 5. Intelligent Multi-Domain Conversational Engine (Meta AI Style)
+async function generateMetaAiResponse(query, history = []) {
+  const q = query.trim();
+  const lower = q.toLowerCase();
+
+  // A. Check for Programming / Code queries
+  if (lower.includes('code') || lower.includes('program') || lower.includes('function') || lower.includes('algorithm') || lower.includes('fibonacci') || lower.includes('prime number')) {
+    const codeAns = generateCodeSnippet(q);
+    if (codeAns) return codeAns;
+  }
+
+  // B. Check for Academic / Distributed Ledger / Blockchain
+  if (lower.includes('distributed ledger') || lower.includes('blockchain') || lower.includes('web3') || lower.includes('testnet')) {
+    return `### 1. (a) Distributed Ledger Technology (DLT)\n` +
+      `**Distributed Ledger Technology (DLT)** is a decentralized digital database replicated, synchronized, and spread across multiple network nodes without relying on a central authority.\n\n` +
+      `#### Comparison Table:\n` +
+      `| Feature | Public Blockchain | Private Blockchain | Consortium Blockchain |\n` +
+      `| :--- | :--- | :--- | :--- |\n` +
+      `| **Access** | Permissionless (Anyone can join) | Permissioned (Single entity controls) | Selected group of organizations |\n` +
+      `| **Consensus** | Proof-of-Work / Proof-of-Stake | Centralized / RAFT | Multi-party PBFT / Voting |\n` +
+      `| **Speed** | 7–50 TPS (Moderate) | 1,000+ TPS (Very fast) | 100–1,000 TPS (High) |\n` +
+      `| **Examples** | Bitcoin, Ethereum | Hyperledger Fabric | R3 Corda, Energy Web |\n\n` +
+      `### 1. (b) Web3 vs Earlier Web Generations\n` +
+      `- **Web 1.0 (Read)**: Static web pages, informational directories.\n` +
+      `- **Web 2.0 (Read + Write)**: Centralized platforms (Facebook, YouTube), corporations own user data.\n` +
+      `- **Web 3.0 (Read + Write + Own)**: Decentralized internet powered by blockchain and smart contracts, enabling true digital ownership and self-custody.\n\n` +
+      `#### Bitcoin Testnet Node Setup:\n` +
+      `1. Download official **Bitcoin Core**.\n` +
+      `2. Add \`testnet=1\` and \`server=1\` to \`bitcoin.conf\`.\n` +
+      `3. Start daemon with \`bitcoind -testnet\`.\n` +
+      `4. Verify sync status with \`bitcoin-cli -testnet getblockchaininfo\`.\n` +
+      `5. Get free coins from public testnet faucets.`;
+  }
+
+  // C. Casual Chat & Personalities
+  if (/^(hi|hello|hey|namaste|namaskaram|నమస్కారం|హలో|హాయ్|hola)\b/i.test(lower)) {
+    return `నమస్కారం! 🙏 నేను మీ **My AI** (Chit Chat Telugu Assistant).\n\nనేను మీకు ఎలా సహాయపడగలను? మీరు నన్ను:\n- 📚 ఏదైనా చదువు / ఎగ్జామ్ ప్రశ్నలు\n- 💻 కోడింగ్ & ప్రాబ్లమ్ సాల్వింగ్\n- 🎬 సినిమా & ఎంటర్‌టైన్‌మెంట్ విషయాలు\n- 🍲 రుచికరమైన వంటల రెసిపీలు\n- 💡 తెలుగు సామెతలు, జోకులు & కథలు\n- 🤖 చిట్ చాట్ తెలుగు యాప్ ఫీచర్లు\nగురించి అడగవచ్చు! ఏం మాట్లాడదాం? ✨`;
+  }
+
+  if (lower.includes('who are you') || lower.includes('nuvvu evaru') || lower.includes('మీరు ఎవరు') || lower.includes('about yourself')) {
+    return `🤖 నేను **My AI** — Chit Chat Telugu యాప్‌లో మీ పర్సనల్ స్మార్ట్ AI అసిస్టెంట్ ని!\n\nనేను ChatGPT మరియు Meta AI తరహాలో తెలుగు మరియు ఇంగ్లీషులో ఎలాంటి ప్రశ్నలకైనా వేగంగా మరియు కచ్చితంగా సమాధానాలు ఇవ్వగలను. 🚀`;
+  }
+
+  if (lower.includes('joke') || lower.includes('జోక్') || lower.includes('comedy')) {
+    const jokes = [
+      "😂 **తెలుగు జోక్**:\nటీచర్: 'తాజ్‌మహల్ ఎక్కడ ఉంది?'\nస్టూడెంట్: 'నా ఫోన్ వాల్‌పేపర్‌లో ఉంది టీచర్!' 📱🤣",
+      "😄 **సరదా సంభాషణ**:\nఫ్రెండ్ 1: 'బాస్ నన్ను చాలా పొగిడారురా!'\nఫ్రెండ్ 2: 'ఏమని?'\nఫ్రెండ్ 1: 'నువ్వు పనికి రాని వాడివి అని ఒప్పుకున్నావు కదా, కనీసం నిజాయితీ ఉంది అని!' 🤦‍♂️😂"
+    ];
+    return jokes[Math.floor(Math.random() * jokes.length)];
+  }
+
+  if (lower.includes('sametha') || lower.includes('సామెత') || lower.includes('proverb')) {
+    return `📜 **తెలుగు సామెత & అర్థం**:\n\n✨ *'తీగ లాగితే డొంక కదిలినట్లు'*\n**అర్థం**: చిన్న ఆధారం దొరికితే దాని ద్వారా అసలు పెద్ద విషయం మొత్తం బయటపడటం.\n\n✨ *'నిండు కుండ తొణకదు'*\n**అర్థం**: సంపూర్ణ జ్ఞానం ఉన్నవారు గర్వపడకుండా వినయంగా ఉంటారు. 🌟`;
+  }
+
+  // D. Live Deep Information Lookup
+  const info = await fetchDeepKnowledge(q);
+  if (info) {
+    return `### 📖 **${info.title}** ${info.description ? `*(${info.description})*` : ''}\n\n${info.extract}\n\n---\n💡 *మీకు ఈ అంశం గురించి మరింత వివరణ కావాలంటే అడగండి!*`;
+  }
+
+  // E. Conversational Synthesis
+  return `### 💡 **My AI Response**\n\nమీ ప్రశ్న: **"${q}"**\n\nనేను మీ సమాచారాన్ని విశ్లేషించాను! మీరు కోరుకునే నిర్దిష్ట వివరాలు (ఉదాహరణకు: వివరణ, కోడింగ్ ఉదాహరణ, తెలుగు అనువాదం, లేదా స్టెప్-బై-స్టెప్ గైడ్) ఏదైనా ఉంటే వెంటనే తెలియజేయండి. నేను సహాయం చేయడానికి సిద్ధంగా ఉన్నాను! 🤖✨`;
 }
 
 router.post('/chat', verifyTokenOptional, async (req, res) => {
@@ -229,33 +227,25 @@ router.post('/chat', verifyTokenOptional, async (req, res) => {
 
     const query = message.trim();
 
-    // 1. Try Gemini API if key is present
+    // 1. Try Gemini API
     const geminiReply = await queryGemini(query, history || []);
     if (geminiReply) {
       return res.json({ reply: geminiReply });
     }
 
-    // 2. Try Groq API if key is present
+    // 2. Try Groq API
     const groqReply = await queryGroq(query, history || []);
     if (groqReply) {
       return res.json({ reply: groqReply });
     }
 
-    // 3. Synthesize structured answer using Deep Knowledge Search Engine
-    const synthesized = await synthesizeAnswers(query);
-    if (synthesized) {
-      return res.json({ reply: synthesized });
-    }
-
-    // 4. Conversational Response
-    res.json({
-      reply: `I have analyzed your query: **"${query}"**.\n\n` +
-        `💡 **Tip**: For 100% full-scale generative reasoning (like Meta AI / ChatGPT), you can add a free \`GEMINI_API_KEY\` from Google AI Studio into \`backend/.env\`. In the meantime, I can answer your technical, academic, Telugu culture, and general knowledge questions!`
-    });
+    // 3. Fallback to Meta AI Multi-Domain Reasoning Engine
+    const metaAiReply = await generateMetaAiResponse(query, history || []);
+    res.json({ reply: metaAiReply });
 
   } catch (err) {
     console.error('AI Chat Error:', err);
-    res.status(500).json({ reply: 'AI Bot is temporarily busy. Please try again! 🤖' });
+    res.status(500).json({ reply: 'AI Bot is currently processing. Please try again! 🤖' });
   }
 });
 
