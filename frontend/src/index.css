@@ -1227,29 +1227,31 @@ select.form-control { cursor: pointer; }
 .call-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(13,13,18,0.8);
+  background: rgba(13,13,18,0.85);
   backdrop-filter: blur(12px);
   display: flex;
   justify-content: center;
   align-items: center;
-  z-index: 500;
+  z-index: 99999;
   animation: fadeIn 0.25s ease;
 }
 
 .call-card {
   background: var(--brand-800);
-  border: 1px solid rgba(255,255,255,0.08);
-  box-shadow: 0 24px 56px rgba(0,0,0,0.6);
+  border: 1px solid rgba(255,255,255,0.12);
+  box-shadow: 0 24px 60px rgba(0,0,0,0.75);
   border-radius: var(--radius-xl);
-  padding: 40px 36px;
+  padding: 36px 32px;
   width: 90%;
-  max-width: 300px;
+  max-width: 320px;
   text-align: center;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 16px;
   color: white;
+  position: relative;
+  z-index: 100;
   animation: scaleUp 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
@@ -1268,7 +1270,7 @@ select.form-control { cursor: pointer; }
 .call-avatar.pulsing { animation: pulse 2s infinite; }
 
 .call-user-name { font-size: 1.35rem; font-weight: 700; }
-.call-status { font-size: 0.88rem; color: rgba(255,255,255,0.5); }
+.call-status { font-size: 0.88rem; color: rgba(255,255,255,0.7); }
 
 .call-actions { display: flex; gap: 18px; justify-content: center; margin-top: 8px; }
 
@@ -1282,29 +1284,32 @@ select.form-control { cursor: pointer; }
   justify-content: center;
   color: white;
   transition: transform 0.2s, box-shadow 0.2s;
+  cursor: pointer;
 }
 .call-btn:hover { transform: scale(1.1); }
 .call-btn.accept { background: var(--mint-500); box-shadow: 0 4px 16px rgba(0,201,167,0.4); }
 .call-btn.decline { background: var(--coral-500); box-shadow: 0 4px 16px rgba(255,107,107,0.4); }
-.call-btn.mute { background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.15); }
+.call-btn.mute { background: rgba(255,255,255,0.12); border: 1px solid rgba(255,255,255,0.15); }
 .call-btn.mute.muted { background: var(--warning-color); color: white; }
 .call-btn.mute.active { background: var(--brand-500); border-color: var(--brand-400); color: white; }
 
 /* Video Mode Controls */
 .call-card.video-controls {
   position: absolute;
-  bottom: 24px;
-  background: rgba(15, 23, 42, 0.75);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.18);
+  bottom: 28px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(15, 23, 42, 0.85);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.2);
   border-radius: var(--radius-full);
-  padding: 10px 20px;
+  padding: 12px 28px;
   max-width: 90vw;
   width: auto;
   gap: 8px;
-  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.5);
-  z-index: 20;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
+  z-index: 100;
 }
 
 .call-card.video-controls .call-actions {
@@ -1313,8 +1318,8 @@ select.form-control { cursor: pointer; }
 }
 
 .call-card.video-controls .call-btn {
-  width: 48px;
-  height: 48px;
+  width: 50px;
+  height: 50px;
 }
 
 .local-video-preview {

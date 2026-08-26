@@ -67,7 +67,7 @@ const CallOverlay = ({
     };
   }, [callState]);
 
-  // 3. Setup WebRTC peer connection when call becomes 'connected' (for callee) or 'outgoing' (for caller)
+  // 3. Setup WebRTC peer connection
   useEffect(() => {
     let currentCallState = callState;
     if (currentCallState === 'outgoing') {
@@ -75,11 +75,7 @@ const CallOverlay = ({
     } else if (currentCallState === 'connected' && incomingSignal && !peerConnectionRef.current) {
       setupWebRTCAsCallee();
     }
-
-    return () => {
-      // Only run cleanup if the component unmounts, not on every state change!
-    };
-  }, [callState]); // We removed cleanup from here and moved it to unmount!
+  }, [callState]);
 
   useEffect(() => {
     return () => {
@@ -87,7 +83,7 @@ const CallOverlay = ({
     };
   }, []);
 
-  // 4. Handle accepted signal (Caller side gets this when callee accepts)
+  // 4. Handle accepted signal
   useEffect(() => {
     if (acceptedSignal && peerConnectionRef.current && !isRemoteDescriptionSet.current) {
       console.log("Setting remote description on caller side");
@@ -104,17 +100,15 @@ const CallOverlay = ({
     }
   }, [acceptedSignal]);
 
-  // 5. Handle incoming ICE candidates from App prop
+  // 5. Handle incoming ICE candidates
   useEffect(() => {
     if (iceCandidates && iceCandidates.length > 0) {
       iceCandidates.forEach((candidateObj, index) => {
         if (!processedCandidates.current.has(index)) {
           if (peerConnectionRef.current && isRemoteDescriptionSet.current) {
-            console.log("Adding ICE candidate immediately from prop");
             peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(candidateObj))
               .catch(err => console.error("Error adding ICE candidate:", err));
           } else {
-            console.log("Queueing ICE candidate from prop (connection not ready)");
             iceCandidateQueue.current.push(candidateObj);
           }
           processedCandidates.current.add(index);
@@ -206,14 +200,6 @@ const CallOverlay = ({
       }
     ];
 
-    if (import.meta.env.VITE_TURN_URL) {
-      iceServers.push({
-        urls: import.meta.env.VITE_TURN_URL,
-        username: import.meta.env.VITE_TURN_USERNAME,
-        credential: import.meta.env.VITE_TURN_CREDENTIAL,
-      });
-    }
-
     const pc = new RTCPeerConnection({ iceServers });
 
     pc.onicecandidate = (event) => {
@@ -248,7 +234,6 @@ const CallOverlay = ({
     pc.oniceconnectionstatechange = () => {
       console.log("ICE Connection State:", pc.iceConnectionState);
       if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'closed') {
-        console.log("WebRTC connection lost. Hanging up.");
         onHangUp();
       }
     };
@@ -288,7 +273,6 @@ const CallOverlay = ({
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
 
-      console.log("Emitting call_user to", otherUser.id || otherUser._id);
       socket.emit('call_user', {
         userToCall: otherUser.id || otherUser._id,
         signalData: offer,
@@ -298,7 +282,7 @@ const CallOverlay = ({
       });
     } catch (err) {
       console.error("Failed to setup WebRTC as caller:", err);
-      alert("Could not access camera/microphone. Make sure permissions are enabled.");
+      alert("Could not access camera/microphone. Please ensure permissions are granted.");
       onHangUp();
     }
   };
@@ -332,7 +316,6 @@ const CallOverlay = ({
 
       stream.getTracks().forEach(track => pc.addTrack(track, stream));
 
-      console.log("Setting remote description from offer on callee");
       await pc.setRemoteDescription(new RTCSessionDescription(incomingSignal));
       isRemoteDescriptionSet.current = true;
       
@@ -345,21 +328,19 @@ const CallOverlay = ({
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
 
-      console.log("Emitting answer_call to", otherUser.id || otherUser._id);
       socket.emit('answer_call', {
         to: otherUser.id || otherUser._id,
         signal: answer
       });
     } catch (err) {
       console.error("Failed to setup WebRTC as callee:", err);
-      alert("Could not access camera/microphone. Make sure permissions are enabled.");
+      alert("Could not access camera/microphone. Please ensure permissions are granted.");
       onHangUp();
     }
   };
 
   const cleanupWebRTC = () => {
     stopTone();
-    // Explicitly notify other peer that we are disconnecting
     if (socket && otherUser && (otherUser.id || otherUser._id)) {
       socket.emit('end_call', { to: otherUser.id || otherUser._id });
     }
@@ -405,8 +386,6 @@ const CallOverlay = ({
         duration_seconds: duration,
         callType: callType
       });
-    } else if (role === 'callee' && callState === 'connected') {
-      // Both could try to save, but let's let caller save it to avoid duplicates
     }
     onHangUp();
   };
@@ -438,11 +417,8 @@ const CallOverlay = ({
     if (!localStreamRef.current || callType !== 'video') return;
     try {
       const nextFacingMode = facingMode === 'user' ? 'environment' : 'user';
-      
       const oldVideoTrack = localStreamRef.current.getVideoTracks()[0];
-      if (oldVideoTrack) {
-        oldVideoTrack.stop();
-      }
+      if (oldVideoTrack) oldVideoTrack.stop();
 
       let newStream;
       try {
@@ -457,9 +433,7 @@ const CallOverlay = ({
 
       const newVideoTrack = newStream.getVideoTracks()[0];
       if (newVideoTrack) {
-        if (oldVideoTrack) {
-          localStreamRef.current.removeTrack(oldVideoTrack);
-        }
+        if (oldVideoTrack) localStreamRef.current.removeTrack(oldVideoTrack);
         localStreamRef.current.addTrack(newVideoTrack);
 
         if (peerConnectionRef.current) {
@@ -467,8 +441,6 @@ const CallOverlay = ({
           const videoSender = senders.find(s => s.track && s.track.kind === 'video');
           if (videoSender) {
             await videoSender.replaceTrack(newVideoTrack);
-          } else {
-            peerConnectionRef.current.addTrack(newVideoTrack, localStreamRef.current);
           }
         }
 
@@ -477,14 +449,12 @@ const CallOverlay = ({
         }
 
         setFacingMode(nextFacingMode);
-        // If switched to environment (back camera), disable mirroring
         if (nextFacingMode === 'environment') {
           setIsMirrored(false);
         }
       }
     } catch (err) {
       console.error("Failed to switch camera:", err);
-      alert("Could not switch camera: " + (err.message || "Camera not available"));
     }
   };
 
@@ -494,20 +464,13 @@ const CallOverlay = ({
       try {
         const devices = await navigator.mediaDevices.enumerateDevices();
         const audioOutputs = devices.filter(d => d.kind === 'audiooutput');
-        
         if (audioOutputs.length > 1) {
           const currentId = remoteAudioRef.current.sinkId;
           const nextIndex = (audioOutputs.findIndex(d => d.deviceId === currentId) + 1) % audioOutputs.length;
           await remoteAudioRef.current.setSinkId(audioOutputs[nextIndex].deviceId);
           setIsSpeakerOn(!isSpeakerOn);
-        } else {
-          alert("Only one audio output device found. The OS controls the speaker automatically.");
         }
-      } catch (err) {
-        console.error("Error setting speaker:", err);
-      }
-    } else {
-      alert("Your browser does not support manually switching audio output. Use your device's built-in speaker toggle if available.");
+      } catch (err) {}
     }
   };
 
@@ -518,19 +481,20 @@ const CallOverlay = ({
   };
 
   return (
-    <div className={`call-overlay ${callType === 'video' ? 'video-mode' : ''}`}>
+    <div className={`call-overlay ${callType === 'video' ? 'video-mode' : ''}`} style={{ zIndex: 99999 }}>
       {callType === 'video' ? (
-        <div className="video-container" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', background: '#090a0f', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', zIndex: 0, overflow: 'hidden' }}>
+        <div className="video-container" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', background: '#090a0f', zIndex: 1, overflow: 'hidden' }}>
           <video 
             ref={remoteAudioRef} 
             autoPlay 
             playsInline 
-            style={{ width: '100%', height: '100%', objectFit: 'cover', transform: 'none' }} 
+            style={{ width: '100%', height: '100%', objectFit: 'cover' }} 
           />
           <div 
             className="local-video-preview" 
             title="Click to toggle mirror / normal view"
             onClick={() => setIsMirrored(prev => !prev)}
+            style={{ zIndex: 10 }}
           >
             <video 
               ref={localVideoRef} 
@@ -542,7 +506,6 @@ const CallOverlay = ({
                 height: '100%', 
                 objectFit: 'cover', 
                 transform: isMirrored ? 'scaleX(-1)' : 'none',
-                transition: 'transform 0.2s ease',
                 display: isVideoOff ? 'none' : 'block'
               }} 
             />
@@ -561,7 +524,15 @@ const CallOverlay = ({
         <audio ref={remoteAudioRef} autoPlay playsInline />
       )}
       
-      <div className={`call-card ${callType === 'video' && callState === 'connected' ? 'video-controls' : ''}`}>
+      {/* Pinned Call Card Overlay */}
+      <div 
+        className={`call-card ${callType === 'video' && callState === 'connected' ? 'video-controls' : ''}`}
+        style={{
+          position: callType === 'video' && callState === 'connected' ? 'absolute' : 'relative',
+          zIndex: 100,
+          boxShadow: '0 24px 60px rgba(0, 0, 0, 0.75)'
+        }}
+      >
         {(!callType || callType !== 'video' || callState !== 'connected') && (
           <div className="call-avatar-container">
             <div className={`call-avatar ${callState === 'outgoing' || callState === 'incoming' ? 'pulsing' : ''}`}>
@@ -571,33 +542,46 @@ const CallOverlay = ({
         )}
 
         {(!callType || callType !== 'video' || callState !== 'connected') && (
-          <h3 className="call-user-name">{otherUser?.username || 'User'}</h3>
+          <h3 className="call-user-name" style={{ margin: '4px 0', fontSize: '1.3rem', fontWeight: 800 }}>
+            {otherUser?.username || 'User'}
+          </h3>
         )}
-        <p className="call-status" style={callType === 'video' && callState === 'connected' ? { color: 'rgba(255,255,255,0.9)', fontSize: '0.85rem' } : {}}>
+
+        <p className="call-status" style={{ margin: '0 0 14px 0', color: '#cbd5e1', fontSize: '0.92rem' }}>
           {callState === 'outgoing' && 'Calling...'}
-          {callState === 'incoming' && `Incoming ${callType === 'video' ? 'Video' : ''} Call...`}
+          {callState === 'incoming' && `Incoming ${callType === 'video' ? 'Video' : 'Audio'} Call...`}
           {callState === 'connected' && (callType === 'video' ? `In Video Call (${formatTime(duration)})` : `In Call (${formatTime(duration)})`)}
         </p>
 
         {audioFailed && (
           <button 
-            style={{ marginTop: '10px', padding: '8px 16px', background: '#ef4444', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}
+            style={{ marginBottom: '14px', padding: '8px 16px', background: '#ef4444', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold' }}
             onClick={() => {
-              remoteAudioRef.current.play().then(() => setAudioFailed(false)).catch(err => console.error(err));
+              remoteAudioRef.current?.play().then(() => setAudioFailed(false)).catch(console.error);
             }}
           >
-            Tap to Enable Audio
+            Tap to Enable Audio 🔊
           </button>
         )}
 
-        <div className="call-actions">
+        <div className="call-actions" style={{ display: 'flex', gap: '16px', alignItems: 'center', justifyContent: 'center' }}>
           {callState === 'incoming' ? (
             <>
-              <button className="call-btn accept" onClick={onAcceptCall} title="Accept Call">
-                <Phone size={24} />
+              <button 
+                className="call-btn accept" 
+                onClick={onAcceptCall} 
+                title="Accept Call"
+                style={{ width: '60px', height: '60px', borderRadius: '50%', background: '#22c55e', color: 'white', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 4px 18px rgba(34,197,94,0.45)' }}
+              >
+                <Phone size={26} />
               </button>
-              <button className="call-btn decline" onClick={handleDecline} title="Decline Call">
-                <PhoneOff size={24} />
+              <button 
+                className="call-btn decline" 
+                onClick={handleDecline} 
+                title="Decline Call"
+                style={{ width: '60px', height: '60px', borderRadius: '50%', background: '#ef4444', color: 'white', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 4px 18px rgba(239,68,68,0.45)' }}
+              >
+                <PhoneOff size={26} />
               </button>
             </>
           ) : (
@@ -620,14 +604,14 @@ const CallOverlay = ({
                       <button 
                         className="call-btn mute" 
                         onClick={switchCamera} 
-                        title={`Switch Camera (${facingMode === 'user' ? 'Front/Selfie' : 'Back/Rear'})`}
+                        title={`Switch Camera (${facingMode === 'user' ? 'Front' : 'Back'})`}
                       >
                         <SwitchCamera size={22} />
                       </button>
                       <button 
                         className={`call-btn mute ${isMirrored ? 'active' : ''}`} 
                         onClick={() => setIsMirrored(prev => !prev)} 
-                        title={isMirrored ? "Mirror View: ON (Click for Normal)" : "Mirror View: OFF (Click to Mirror)"}
+                        title={isMirrored ? "Mirror View: ON" : "Mirror View: OFF"}
                       >
                         <FlipHorizontal size={22} />
                       </button>
@@ -641,8 +625,28 @@ const CallOverlay = ({
                   )}
                 </>
               )}
-              <button className="call-btn decline" onClick={handleHangUp} title="End Call">
-                <PhoneOff size={24} />
+
+              {/* End / Cancel Call Button */}
+              <button 
+                className="call-btn decline" 
+                onClick={handleHangUp} 
+                title={callState === 'connected' ? "End Call" : "Cancel Call"}
+                style={{
+                  width: '60px',
+                  height: '60px',
+                  borderRadius: '50%',
+                  background: '#ef4444',
+                  color: 'white',
+                  border: 'none',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  cursor: 'pointer',
+                  boxShadow: '0 4px 20px rgba(239,68,68,0.5)',
+                  transition: 'transform 0.15s ease'
+                }}
+              >
+                <PhoneOff size={26} />
               </button>
             </>
           )}
