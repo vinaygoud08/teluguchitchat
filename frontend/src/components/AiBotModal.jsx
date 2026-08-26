@@ -233,54 +233,6 @@ function AiBotModal({ onClose }) {
         </div>
       </div>
 
-      {/* Suggestion Chips Banner */}
-      <div style={{
-        background: '#1e293b',
-        borderBottom: '1px solid rgba(255,255,255,0.08)',
-        padding: '10px 20px',
-        display: 'flex',
-        gap: '10px',
-        overflowX: 'auto',
-        scrollbarWidth: 'none',
-        flexShrink: 0
-      }}>
-        <div style={{ display: 'flex', gap: '10px', maxWidth: '900px', margin: '0 auto', width: '100%' }}>
-          {SUGGESTIONS.map((item, index) => (
-            <button
-              key={index}
-              onClick={() => handleSend(item.text)}
-              style={{
-                background: 'rgba(255,255,255,0.08)',
-                border: '1px solid rgba(255,255,255,0.15)',
-                borderRadius: '20px',
-                padding: '6px 14px',
-                fontSize: '0.82rem',
-                fontWeight: 600,
-                color: '#e2e8f0',
-                cursor: 'pointer',
-                whiteSpace: 'nowrap',
-                transition: 'all 0.15s ease',
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '4px'
-              }}
-              onMouseEnter={e => { 
-                e.currentTarget.style.borderColor = '#818cf8'; 
-                e.currentTarget.style.background = 'rgba(99, 102, 241, 0.25)';
-                e.currentTarget.style.color = '#ffffff'; 
-              }}
-              onMouseLeave={e => { 
-                e.currentTarget.style.borderColor = 'rgba(255,255,255,0.15)'; 
-                e.currentTarget.style.background = 'rgba(255,255,255,0.08)';
-                e.currentTarget.style.color = '#e2e8f0'; 
-              }}
-            >
-              {item.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
       {/* Main Full-Screen Messages Area */}
       <div style={{
         flex: 1,
