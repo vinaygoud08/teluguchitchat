@@ -28,15 +28,17 @@ function ImageViewerModal({ imageUrl, onClose, socket, activeChat, isGroup, frie
       const isTargetGroup = myGroups.some(g => g.id === targetId);
       const baseData = {
         sender: user ? user.username : 'Guest',
+        senderId: user ? (user.id || user._id) : null,
         timestamp: new Date().toISOString(),
         imageUrl: imageUrl,
         viewOnce: false
       };
       
       if (isTargetGroup) {
-        socket.emit('send_message', { ...baseData, room: targetId });
+        socket.emit('send_group_message', { ...baseData, room: targetId });
       } else {
-        socket.emit('send_private_message', { ...baseData, recipientId: targetId });
+        const room = user ? [(user.id || user._id), targetId].sort().join('_') : targetId;
+        socket.emit('send_private_message', { ...baseData, room, recipientId: targetId });
       }
     });
   };
@@ -109,7 +111,7 @@ function ImageViewerModal({ imageUrl, onClose, socket, activeChat, isGroup, frie
 
     {showForward && (
       <ForwardModal 
-        imageUrl={imageUrl}
+        forwardMsg={{ imageUrl }}
         friends={friends}
         myGroups={myGroups}
         onClose={() => setShowForward(false)}

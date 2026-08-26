@@ -169,9 +169,15 @@ io.on('connection', (socket) => {
 
   socket.on('delete_message', async (data) => {
     try {
-      if (data.messageId && data.room) {
-        const { error } = await supabase.from('messages').delete().eq('id', data.messageId);
-        io.to(data.room).emit('message_deleted', { messageId: data.messageId });
+      if (data.messageId) {
+        await supabase.from('messages').delete().eq('id', data.messageId).catch(() => {});
+        if (data.room) {
+          io.to(data.room).emit('message_deleted', { messageId: data.messageId });
+        }
+        if (data.otherUserId) {
+          io.to(data.otherUserId).emit('message_deleted', { messageId: data.messageId });
+        }
+        socket.emit('message_deleted', { messageId: data.messageId });
       }
     } catch (err) {
       console.error('Error deleting message:', err);
@@ -180,10 +186,17 @@ io.on('connection', (socket) => {
 
   socket.on('pin_message', async (data) => {
     try {
-      if (data.messageId && data.room) {
+      if (data.messageId) {
         const isPinned = !data.unpin;
-        io.to(data.room).emit('message_pinned', { messageId: data.messageId, isPinned, roomKey: data.room });
         await supabase.from('messages').update({ is_pinned: isPinned }).eq('id', data.messageId).catch(() => {});
+        const roomKey = data.roomKey || data.room;
+        if (data.room) {
+          io.to(data.room).emit('message_pinned', { messageId: data.messageId, isPinned, roomKey });
+        }
+        if (data.otherUserId) {
+          io.to(data.otherUserId).emit('message_pinned', { messageId: data.messageId, isPinned, roomKey });
+        }
+        socket.emit('message_pinned', { messageId: data.messageId, isPinned, roomKey });
       }
     } catch (err) {
       console.error('Error pinning message:', err);

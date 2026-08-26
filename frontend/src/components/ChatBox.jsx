@@ -186,7 +186,8 @@ const ChatBox = ({ socket, activeChat, onInitiateCall, users = [], myGroups = []
   // Context Menu & Replies
   const [contextMenu, setContextMenu] = useState(null);
   const [replyingTo, setReplyingTo] = useState(null);
-  const [forwardImageMsg, setForwardImageMsg] = useState(null);
+  const [forwardMsg, setForwardMsg] = useState(null);
+  const [copiedToast, setCopiedToast] = useState(false);
   
   const messagesEndRef = useRef(null);
 
@@ -630,72 +631,159 @@ const ChatBox = ({ socket, activeChat, onInitiateCall, users = [], myGroups = []
         />
       )}
 
+      {copiedToast && (
+        <div style={{
+          position: 'fixed',
+          bottom: '80px',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          background: 'rgba(15, 23, 42, 0.9)',
+          color: '#4ade80',
+          padding: '10px 20px',
+          borderRadius: '24px',
+          fontWeight: 700,
+          fontSize: '0.88rem',
+          boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
+          zIndex: 100000,
+          border: '1px solid rgba(74, 222, 128, 0.3)',
+          animation: 'fadeIn 0.2s ease'
+        }}>
+          📋 Text copied to clipboard!
+        </div>
+      )}
+
       {contextMenu && (
         <>
           {/* Overlay to close menu when clicking outside */}
           <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', zIndex: 9999 }} onClick={() => setContextMenu(null)} onContextMenu={(e) => { e.preventDefault(); setContextMenu(null); }} />
           <div style={{
             position: 'fixed',
-            top: contextMenu.y,
-            left: contextMenu.x,
-            background: 'white',
-            color: 'black',
-            boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
-            borderRadius: '8px',
-            padding: '8px 0',
+            top: Math.min(contextMenu.y, window.innerHeight - 240),
+            left: Math.min(contextMenu.x, window.innerWidth - 180),
+            background: '#ffffff',
+            color: '#1e293b',
+            boxShadow: '0 12px 36px rgba(0,0,0,0.25)',
+            borderRadius: '16px',
+            padding: '6px',
             zIndex: 10000,
-            minWidth: '150px',
+            minWidth: '160px',
             display: 'flex',
-            flexDirection: 'column'
+            flexDirection: 'column',
+            border: '1px solid #e2e8f0'
           }}>
+            {/* 1. Reply */}
             <button 
               onClick={() => { setReplyingTo(contextMenu.msg); setContextMenu(null); }}
-              style={{ background: 'none', border: 'none', padding: '10px 15px', textAlign: 'left', cursor: 'pointer', width: '100%' }}
+              style={{ background: 'none', border: 'none', padding: '10px 14px', textAlign: 'left', cursor: 'pointer', width: '100%', borderRadius: '10px', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.9rem', color: '#1e293b', fontWeight: 600 }}
+              onMouseEnter={e => { e.currentTarget.style.background = '#f1f5f9'; }}
+              onMouseLeave={e => { e.currentTarget.style.background = 'none'; }}
             >
-              Reply
+              <span>↩️</span> Reply
             </button>
-            {(contextMenu.msg.imageUrl || contextMenu.msg.text) && (
-              <button 
-                onClick={() => { setForwardImageMsg(contextMenu.msg); setContextMenu(null); }}
-                style={{ background: 'none', border: 'none', padding: '10px 15px', textAlign: 'left', cursor: 'pointer', width: '100%' }}
-              >
-                Forward
-              </button>
-            )}
+
+            {/* 2. Forward */}
+            <button 
+              onClick={() => { setForwardMsg(contextMenu.msg); setContextMenu(null); }}
+              style={{ background: 'none', border: 'none', padding: '10px 14px', textAlign: 'left', cursor: 'pointer', width: '100%', borderRadius: '10px', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.9rem', color: '#1e293b', fontWeight: 600 }}
+              onMouseEnter={e => { e.currentTarget.style.background = '#f1f5f9'; }}
+              onMouseLeave={e => { e.currentTarget.style.background = 'none'; }}
+            >
+              <span>➡️</span> Forward
+            </button>
+
+            {/* 3. Copy */}
             {contextMenu.msg.text && (
               <button 
                 onClick={() => {
-                  navigator.clipboard.writeText(contextMenu.msg.text);
+                  const textToCopy = contextMenu.msg.text;
+                  if (navigator.clipboard && window.isSecureContext) {
+                    navigator.clipboard.writeText(textToCopy);
+                  } else {
+                    const el = document.createElement('textarea');
+                    el.value = textToCopy;
+                    document.body.appendChild(el);
+                    el.select();
+                    try { document.execCommand('copy'); } catch(e) {}
+                    document.body.removeChild(el);
+                  }
+                  setCopiedToast(true);
+                  setTimeout(() => setCopiedToast(false), 2000);
                   setContextMenu(null);
                 }}
-                style={{ background: 'none', border: 'none', padding: '10px 15px', textAlign: 'left', cursor: 'pointer', width: '100%' }}
+                style={{ background: 'none', border: 'none', padding: '10px 14px', textAlign: 'left', cursor: 'pointer', width: '100%', borderRadius: '10px', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.9rem', color: '#1e293b', fontWeight: 600 }}
+                onMouseEnter={e => { e.currentTarget.style.background = '#f1f5f9'; }}
+                onMouseLeave={e => { e.currentTarget.style.background = 'none'; }}
               >
-                Copy
+                <span>📋</span> Copy
               </button>
             )}
+
+            {/* 4. Pin */}
             <button 
               onClick={() => {
-                const roomKey = activeChat === 'home' ? 'home_chat' : activeChat; // Adjust based on how messages are keyed, wait, for group/private it relies on activeChat
-                // Let's emit pin
-                socket.emit('pin_message', { messageId: contextMenu.msg.id, room: roomKey });
+                const roomKey = activeChat === 'home' 
+                  ? 'home_chat' 
+                  : (activeGroup ? activeChat : (user ? [user.id, activeChat].sort().join('_') : activeChat));
+                
+                socket.emit('pin_message', { 
+                  messageId: contextMenu.msg.id, 
+                  room: roomKey, 
+                  roomKey: activeChat,
+                  otherUserId: activeChat !== 'home' ? activeChat : null 
+                });
+
+                // Optimistically toggle pin locally
+                setMessages(prev => {
+                  const curr = prev[activeChat] || [];
+                  return {
+                    ...prev,
+                    [activeChat]: curr.map(m => m.id === contextMenu.msg.id ? { ...m, is_pinned: !m.is_pinned } : m)
+                  };
+                });
+                
                 setContextMenu(null);
               }}
-              style={{ background: 'none', border: 'none', padding: '10px 15px', textAlign: 'left', cursor: 'pointer', width: '100%' }}
+              style={{ background: 'none', border: 'none', padding: '10px 14px', textAlign: 'left', cursor: 'pointer', width: '100%', borderRadius: '10px', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.9rem', color: '#1e293b', fontWeight: 600 }}
+              onMouseEnter={e => { e.currentTarget.style.background = '#f1f5f9'; }}
+              onMouseLeave={e => { e.currentTarget.style.background = 'none'; }}
             >
-              Pin
+              <span>📌</span> {contextMenu.msg.is_pinned ? 'Unpin' : 'Pin'}
             </button>
+
+            {/* 5. Delete */}
             {(contextMenu.msg.senderId === user?.id || contextMenu.msg.sender === user?.username) && (
               <button 
                 onClick={() => {
-                  const roomKey = activeChat === 'home' ? 'home_chat' : activeChat;
-                  socket.emit('delete_message', { messageId: contextMenu.msg.id, room: roomKey });
+                  const roomKey = activeChat === 'home' 
+                    ? 'home_chat' 
+                    : (activeGroup ? activeChat : (user ? [user.id, activeChat].sort().join('_') : activeChat));
+
+                  socket.emit('delete_message', { 
+                    messageId: contextMenu.msg.id, 
+                    room: roomKey,
+                    otherUserId: activeChat !== 'home' ? activeChat : null
+                  });
+
+                  // Optimistically remove locally
+                  setMessages(prev => {
+                    const curr = prev[activeChat] || [];
+                    return {
+                      ...prev,
+                      [activeChat]: curr.filter(m => m.id !== contextMenu.msg.id)
+                    };
+                  });
+
                   setContextMenu(null);
                 }}
-                style={{ background: 'none', border: 'none', padding: '10px 15px', textAlign: 'left', cursor: 'pointer', width: '100%', color: 'red' }}
+                style={{ background: 'none', border: 'none', padding: '10px 14px', textAlign: 'left', cursor: 'pointer', width: '100%', borderRadius: '10px', color: '#ef4444', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.9rem', fontWeight: 600 }}
+                onMouseEnter={e => { e.currentTarget.style.background = '#fef2f2'; }}
+                onMouseLeave={e => { e.currentTarget.style.background = 'none'; }}
               >
-                Delete
+                <span>🗑️</span> Delete
               </button>
             )}
+
+            {/* 6. Save to Gallery */}
             {contextMenu.msg.imageUrl && (
               <button 
                 onClick={() => {
@@ -714,37 +802,44 @@ const ChatBox = ({ socket, activeChat, onInitiateCall, users = [], myGroups = []
                     .catch(err => console.error("Download failed:", err));
                   setContextMenu(null);
                 }}
-                style={{ background: 'none', border: 'none', padding: '10px 15px', textAlign: 'left', cursor: 'pointer', width: '100%' }}
+                style={{ background: 'none', border: 'none', padding: '10px 14px', textAlign: 'left', cursor: 'pointer', width: '100%', borderRadius: '10px', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.9rem', color: '#1e293b', fontWeight: 600 }}
+                onMouseEnter={e => { e.currentTarget.style.background = '#f1f5f9'; }}
+                onMouseLeave={e => { e.currentTarget.style.background = 'none'; }}
               >
-                Save to Gallery
+                <span>💾</span> Save to Gallery
               </button>
             )}
           </div>
         </>
       )}
 
-      {forwardImageMsg && (
+      {forwardMsg && (
         <ForwardModal 
-          imageUrl={forwardImageMsg.imageUrl}
+          forwardMsg={forwardMsg}
           friends={users}
           myGroups={myGroups}
-          onClose={() => setForwardImageMsg(null)}
+          onClose={() => setForwardMsg(null)}
           onSend={(selectedIds) => {
             selectedIds.forEach(targetId => {
               const isTargetGroup = myGroups.some(g => g.id === targetId);
               const baseData = {
                 sender: user ? user.username : 'Guest',
+                senderId: user ? user.id : null,
                 timestamp: new Date().toISOString(),
-                imageUrl: forwardImageMsg.imageUrl,
+                text: forwardMsg.text || '',
+                imageUrl: forwardMsg.imageUrl || null,
+                stickerUrl: forwardMsg.stickerUrl || null,
+                gifUrl: forwardMsg.gifUrl || null,
                 viewOnce: false
               };
               if (isTargetGroup) {
-                socket.emit('send_message', { ...baseData, room: targetId });
+                socket.emit('send_group_message', { ...baseData, room: targetId });
               } else {
-                socket.emit('send_private_message', { ...baseData, recipientId: targetId });
+                const room = user ? [user.id, targetId].sort().join('_') : targetId;
+                socket.emit('send_private_message', { ...baseData, room, recipientId: targetId });
               }
             });
-            setForwardImageMsg(null);
+            setForwardMsg(null);
           }}
         />
       )}
