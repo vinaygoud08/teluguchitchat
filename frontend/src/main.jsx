@@ -83,12 +83,19 @@ class ErrorBoundary extends Component {
   }
 }
 
-createRoot(document.getElementById('root')).render(
-  <StrictMode>
-    <ErrorBoundary>
-      <SettingsProvider>
-        <App />
-      </SettingsProvider>
-    </ErrorBoundary>
-  </StrictMode>,
-)
+// Ensure DOM container exists
+const container = document.getElementById('root');
+if (container) {
+  const root = createRoot(container);
+  root.render(
+    <StrictMode>
+      <ErrorBoundary>
+        <SettingsProvider>
+          <App />
+        </SettingsProvider>
+      </ErrorBoundary>
+    </StrictMode>
+  );
+} else {
+  console.error("Root element #root not found in document");
+}
