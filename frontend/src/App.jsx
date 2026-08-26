@@ -85,9 +85,14 @@ function App() {
   const iceCandidatesMap = useRef({});
 
   useEffect(() => {
-    const storedUser = localStorage.getItem('user');
-    if (token && storedUser) {
-      setUser(JSON.parse(storedUser));
+    try {
+      const storedUser = localStorage.getItem('user');
+      if (token && storedUser && storedUser !== 'undefined' && storedUser !== 'null') {
+        setUser(JSON.parse(storedUser));
+      }
+    } catch (e) {
+      console.warn("Invalid stored user JSON, resetting:", e);
+      localStorage.removeItem('user');
     }
   }, [token]);
 

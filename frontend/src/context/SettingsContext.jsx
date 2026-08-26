@@ -6,12 +6,20 @@ export const useSettings = () => useContext(SettingsContext);
 
 export const SettingsProvider = ({ children }) => {
   const [notifications, setNotifications] = useState(() => {
-    const saved = localStorage.getItem('appSettings_notifications');
-    return saved ? JSON.parse(saved) : {
-      messages: true,
-      calls: true,
-      randomChat: true
-    };
+    try {
+      const saved = localStorage.getItem('appSettings_notifications');
+      return saved ? JSON.parse(saved) : {
+        messages: true,
+        calls: true,
+        randomChat: true
+      };
+    } catch (e) {
+      return {
+        messages: true,
+        calls: true,
+        randomChat: true
+      };
+    }
   });
 
   useEffect(() => {
