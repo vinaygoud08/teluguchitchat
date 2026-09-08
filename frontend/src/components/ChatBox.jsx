@@ -426,16 +426,29 @@ const ChatBox = ({ socket, activeChat, onInitiateCall, users = [], myGroups = []
             <>
               <div 
                 className="avatar avatar-public" 
-                style={{ width: 40, height: 40, fontSize: '1rem', background: '#e91e63', cursor: 'pointer' }}
+                style={{
+                  width: 40, height: 40, fontSize: '1.2rem',
+                  background: activeGroup.avatar_url ? 'transparent' : 'linear-gradient(135deg, #7c6ff7, #ec4899)',
+                  cursor: 'pointer', overflow: 'hidden', padding: 0,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center'
+                }}
                 onClick={() => setShowGroupInfo(true)}
-              >👥</div>
+              >
+                {activeGroup.avatar_url ? (
+                  <img src={activeGroup.avatar_url} alt="Group" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '50%' }} />
+                ) : (
+                  '👥'
+                )}
+              </div>
               <div 
                 className="chat-header-info" 
                 style={{ cursor: 'pointer' }} 
                 onClick={() => setShowGroupInfo(true)}
               >
                 <h2>{activeGroup.name}</h2>
-                <span className="status-text online">Group Chat • tap for info</span>
+                <span className="status-text online">
+                  {activeGroup.myRole === 'admin' ? '🛡️ Group Admin • Tap for info' : 'Group • Tap for info'}
+                </span>
               </div>
             </>
           ) : otherUser ? (
@@ -602,12 +615,32 @@ const ChatBox = ({ socket, activeChat, onInitiateCall, users = [], myGroups = []
           </div>
         )}
         <div style={{ width: '100%' }}>
-          <MessageInput socket={socket} activeChat={activeChat} isGroup={!!activeGroup} onInitiateCall={onInitiateCall} replyingTo={replyingTo} onClearReply={() => setReplyingTo(null)} otherUser={otherUser} />
+          <MessageInput 
+            socket={socket} 
+            activeChat={activeChat} 
+            isGroup={!!activeGroup} 
+            activeGroup={activeGroup}
+            onInitiateCall={onInitiateCall} 
+            replyingTo={replyingTo} 
+            onClearReply={() => setReplyingTo(null)} 
+            otherUser={otherUser} 
+          />
         </div>
       </div>
 
       {showGroupInfo && activeGroup && (
-        <GroupInfoModal group={activeGroup} onClose={() => setShowGroupInfo(false)} />
+        <GroupInfoModal 
+          group={activeGroup} 
+          onClose={() => setShowGroupInfo(false)}
+          onGroupUpdated={(updated) => {
+            // refresh group details if needed
+          }}
+          onGroupDeleted={() => {
+            setShowGroupInfo(false);
+            if (onBackToSidebar) onBackToSidebar();
+          }}
+          onInitiateCall={onInitiateCall}
+        />
       )}
 
       {showRestartWarning && (

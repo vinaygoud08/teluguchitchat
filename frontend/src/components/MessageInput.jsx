@@ -26,20 +26,23 @@ const STICKERS = [
   'https://media.giphy.com/media/QvBoMEcQ7DQXK/giphy.gif'
 ];
 
-const MessageInput = ({ socket, activeChat, isGroup, onInitiateCall, replyingTo, onClearReply, otherUser }) => {
+const MessageInput = ({ socket, activeChat, isGroup, activeGroup, onInitiateCall, replyingTo, onClearReply, otherUser }) => {
   const { user, token } = useAuth();
   const [text, setText] = useState('');
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [showStickerPicker, setShowStickerPicker] = useState(false);
   const fileInputRef = useRef(null);
 
+  const isRestrictedByAdmin = isGroup && activeGroup?.send_messages_permission === 'admins_only' && activeGroup?.myRole !== 'admin';
+
   const handleSendText = () => {
-    if (!text.trim()) return;
+    if (!text.trim() || isRestrictedByAdmin) return;
     sendMessage({ text: text.trim() });
     setText('');
   };
 
   const sendMessage = async (content) => {
+    if (isRestrictedByAdmin) return;
     let messageText = content.text;
     
     // Encrypt private messages if otherUser has a public key
@@ -70,16 +73,16 @@ const MessageInput = ({ socket, activeChat, isGroup, onInitiateCall, replyingTo,
       socket.emit('send_group_message', {
         ...baseData,
         room: activeChat,
-        senderId: user.id
+        senderId: user.id || user._id
       });
     } else {
       if (!user) return; // Guests can't send private messages
       const isStranger = activeChat.startsWith('stranger_');
-      const room = isStranger ? activeChat : [user.id, activeChat].sort().join('_');
+      const room = isStranger ? activeChat : [user.id || user._id, activeChat].sort().join('_');
       socket.emit('send_private_message', {
         ...baseData,
         room,
-        senderId: user.id,
+        senderId: user.id || user._id,
         recipientId: activeChat
       });
     }
@@ -90,13 +93,13 @@ const MessageInput = ({ socket, activeChat, isGroup, onInitiateCall, replyingTo,
   };
 
   const handleImageClick = () => {
-    if (!user) return;
+    if (!user || isRestrictedByAdmin) return;
     fileInputRef.current.click();
   };
 
   const handleFileChange = async (e) => {
     const file = e.target.files[0];
-    if (!file) return;
+    if (!file || isRestrictedByAdmin) return;
 
     const isViewOnce = window.confirm("Send this image as 'View Once'?");
 
@@ -119,7 +122,7 @@ const MessageInput = ({ socket, activeChat, isGroup, onInitiateCall, replyingTo,
   };
 
   const handleGifClick = () => {
-    if (!user) return;
+    if (!user || isRestrictedByAdmin) return;
     const url = prompt('Paste the direct URL of the GIF:');
     if (url) {
       sendMessage({ gifUrl: url });
@@ -127,7 +130,7 @@ const MessageInput = ({ socket, activeChat, isGroup, onInitiateCall, replyingTo,
   };
 
   const handleEmojiToggle = () => {
-    if (!user) return;
+    if (!user || isRestrictedByAdmin) return;
     setShowEmojiPicker(!showEmojiPicker);
     setShowStickerPicker(false);
   };
@@ -137,7 +140,7 @@ const MessageInput = ({ socket, activeChat, isGroup, onInitiateCall, replyingTo,
   };
 
   const handleStickerClick = () => {
-    if (!user) return;
+    if (!user || isRestrictedByAdmin) return;
     setShowStickerPicker(!showStickerPicker);
     setShowEmojiPicker(false);
   };
@@ -148,6 +151,19 @@ const MessageInput = ({ socket, activeChat, isGroup, onInitiateCall, replyingTo,
   };
 
   const isGuestInPrivate = !user && activeChat !== 'home';
+
+  if (isRestrictedByAdmin) {
+    return (
+      <div style={{
+        width: '100%', padding: '14px 20px', background: 'rgba(32, 44, 51, 0.95)',
+        color: '#8696a0', textAlign: 'center', fontSize: '0.88rem', borderRadius: '12px',
+        border: '1px solid rgba(255,255,255,0.08)', backdropFilter: 'blur(8px)', display: 'flex',
+        alignItems: 'center', justifyContent: 'center', gap: '8px'
+      }}>
+        <span>🔒 Only admins can send messages to this group</span>
+      </div>
+    );
+  }
 
   return (
     <div className="input-area">
@@ -171,8 +187,6 @@ const MessageInput = ({ socket, activeChat, isGroup, onInitiateCall, replyingTo,
         onChange={handleFileChange}
       />
       
-
-
       <button 
         className="action-btn" 
         disabled={!user} 
@@ -199,8 +213,6 @@ const MessageInput = ({ socket, activeChat, isGroup, onInitiateCall, replyingTo,
       >
         <Sticker size={20} />
       </button>
-
-
 
       <button className="send-btn" onClick={handleSendText} disabled={isGuestInPrivate}>
         <Send size={18} />

@@ -13,42 +13,153 @@ const verifyTokenOptional = (req, res, next) => {
   next();
 };
 
-// 1. Google Gemini API (if GEMINI_API_KEY in .env)
-async function queryGemini(userPrompt, conversationHistory = []) {
+// Helper to clean raw LaTeX and math notation into readable standard text
+function cleanLatexSyntax(text) {
+  if (!text) return '';
+  let res = text;
+  // Fractions: \frac{a}{b} -> (a / b)
+  res = res.replace(/\\frac\{([^}]+)\}\{([^}]+)\}/g, '($1 / $2)');
+  res = res.replace(/\\dfrac\{([^}]+)\}\{([^}]+)\}/g, '($1 / $2)');
+  // Sums, Integrals
+  res = res.replace(/\\sum_\{([^}]+)\}\^\{([^}]+)\}/g, '∑[$1 to $2]');
+  res = res.replace(/\\sum/g, '∑');
+  res = res.replace(/\\int_\{([^}]+)\}\^\{([^}]+)\}/g, '∫[$1 to $2]');
+  res = res.replace(/\\int/g, '∫');
+  // Text & Fonts
+  res = res.replace(/\\mathbf\{([^}]+)\}/g, '$1');
+  res = res.replace(/\\textbf\{([^}]+)\}/g, '$1');
+  res = res.replace(/\\text\{([^}]+)\}/g, '$1');
+  res = res.replace(/\\mathrm\{([^}]+)\}/g, '$1');
+  res = res.replace(/\\mathbb\{([^}]+)\}/g, '$1');
+  res = res.replace(/\\left\(/g, '(').replace(/\\right\)/g, ')');
+  res = res.replace(/\\left\[/g, '[').replace(/\\right\]/g, ']');
+  res = res.replace(/\\left\\\{/g, '{').replace(/\\right\\\}/g, '}');
+  res = res.replace(/\\\{/g, '{').replace(/\\\}/g, '}');
+  // Math symbols
+  res = res.replace(/\\approx/g, '≈');
+  res = res.replace(/\\leq?/g, '≤');
+  res = res.replace(/\\geq?/g, '≥');
+  res = res.replace(/\\neq?/g, '≠');
+  res = res.replace(/\\times/g, '×');
+  res = res.replace(/\\cdot/g, '·');
+  res = res.replace(/\\div/g, '÷');
+  res = res.replace(/\\pm/g, '±');
+  res = res.replace(/\\implies/g, '⟹');
+  res = res.replace(/\\sqrt\{([^}]+)\}/g, '√($1)');
+  res = res.replace(/\\sqrt/g, '√');
+  // Superscripts & Subscripts
+  res = res.replace(/\^2\b/g, '²').replace(/\^3\b/g, '³').replace(/\^n\b/g, 'ⁿ');
+  res = res.replace(/_i\b/g, 'ᵢ').replace(/_1\b/g, '₁').replace(/_2\b/g, '₂').replace(/_3\b/g, '₃');
+  // Strip raw dollar signs used as LaTeX delimiters
+  res = res.replace(/\$\$/g, '').replace(/\$/g, '');
+  return res;
+}
+
+// Helper to detect Image Generation Requests
+function detectImageGenRequest(text) {
+  if (!text) return null;
+  const t = text.trim();
+  const enMatch = t.match(/^(?:please\s+)?(?:generate|create|draw|make|paint|render)\s+(?:an?\s+)?(?:image|picture|photo|illustration|art|drawing|pic|wallpaper)\s+(?:of|about|with|for)?\s*(.+)$/i);
+  if (enMatch && enMatch[1]) return enMatch[1].trim();
+
+  const teMatch = t.match(/(.+?)\s*(?:యొక్క\s*)?(?:చిత్రం|బొమ్మ|ఫోటో|చిత్రాన్ని|ఇమేజ్)\s*(?:గీయి|గీయండి|జనరేట్ చేయి|సృష్టించు|సృష్టించండి|తయారు చేయి|కావాలి)/i);
+  if (teMatch && teMatch[1]) return teMatch[1].trim();
+
+  return null;
+}
+
+// 1. Google Gemini API (if GEMINI_API_KEY in .env) with Multimodal Vision & Document Support
+async function queryGemini(userPrompt, conversationHistory = [], attachment = null) {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) return null;
 
-  try {
-    const contents = [
-      {
-        role: 'user',
-        parts: [{
-          text: `You are "My AI", a friendly, ultra-intelligent, and capable AI Assistant inside "Chit Chat Telugu" (like Meta AI, ChatGPT, and Gemini). You write accurate code, solve academic and technical problems, converse naturally in Telugu (తెలుగు) and English, tell stories, and explain concepts clearly with markdown formatting.`
-        }]
-      },
-      ...conversationHistory.map(m => ({
-        role: m.sender === 'user' ? 'user' : 'model',
-        parts: [{ text: m.text }]
-      })),
-      {
-        role: 'user',
-        parts: [{ text: userPrompt }]
+  const models = ['gemini-flash-latest', 'gemini-flash-lite-latest', 'gemini-3.5-flash', 'gemini-3.5-flash-lite'];
+
+  const systemInstruction = `You are "My AI", an elite, world-class Multimodal AI Assistant built into "Chit Chat Telugu" (like ChatGPT, Gemini Pro, and Meta AI on WhatsApp).
+
+### Core Guidelines:
+1. **Direct Responses Only**: Respond directly, accurately, and helpfully to the user's specific message, question, image, or search. Never append robotic lists of capabilities, category menus, or repetitive trailing questions like "(Image analysis, math problems, coding, leda emaina general chat? Tell me!)".
+2. **Vision & Image Understanding**: When the user provides an image, photo, screenshot, or diagram:
+   - Carefully examine all visual details, text, handwriting, objects, equations, diagrams, and figures in the image.
+   - Accurately extract, transcribe, explain, solve, or describe whatever the user asks.
+3. **Document Analysis**: When a document or PDF is attached, analyze the contents, extract answers, summarize key points, or answer specific questions with precision.
+4. **Mathematics & Science**: Solve university & school math, probability, statistics, calculus, discrete math, physics, and engineering questions with clear step-by-step solutions, definitions, formulas, and highlighted final answers.
+5. **Clean Text Formatting**:
+   - Write equations using clean, readable unicode characters (e.g. E[X], V(X), P(X = x), 1/4, ∑, ∫, ², ³, √, ±, ≤, ≥, ×, ÷, ⟹, ≈) instead of raw LaTeX backslash tags.
+   - Do NOT enclose math formulas in dollar signs ($ or $$). Write them cleanly and naturally so anyone reading the text sees standard readable math.
+   - Use clean Markdown for structure: Headings (### Title), Bold (**Answer**), Bullet lists, and Tables (| Header | Value |).
+6. **Coding**: Provide complete, well-commented code blocks with syntax highlighting.
+7. **Bilingual & Natural**: Reply in the language requested (Telugu, English, or Telenglish). If asked in English exam format, provide standard academic English.`;
+
+  for (const model of models) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 35000);
+
+      // Build multimodal parts
+      const userParts = [];
+      
+      let promptText = userPrompt || (attachment ? 'Please analyze this attached file in detail and explain its contents.' : '');
+      
+      // If text document attached
+      if (attachment && attachment.textContent) {
+        promptText += `\n\n--- ATTACHED DOCUMENT CONTENT (${attachment.fileName || 'file'}) ---\n${attachment.textContent.substring(0, 40000)}\n--- END OF ATTACHED DOCUMENT ---`;
       }
-    ];
+      
+      if (promptText) {
+        userParts.push({ text: promptText });
+      }
 
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ contents })
-    });
+      // If binary image or PDF attached
+      if (attachment && attachment.data && attachment.mimeType) {
+        userParts.push({
+          inlineData: {
+            mimeType: attachment.mimeType,
+            data: attachment.data
+          }
+        });
+      }
 
-    if (response.ok) {
-      const data = await response.json();
-      const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (text) return text;
+      const contents = [
+        ...conversationHistory.map(m => ({
+          role: m.sender === 'user' ? 'user' : 'model',
+          parts: [{ text: m.text }]
+        })),
+        {
+          role: 'user',
+          parts: userParts.length > 0 ? userParts : [{ text: 'Hello' }]
+        }
+      ];
+
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
+        body: JSON.stringify({
+          system_instruction: {
+            parts: [{ text: systemInstruction }]
+          },
+          contents,
+          generationConfig: {
+            temperature: 0.6,
+            topP: 0.95,
+            maxOutputTokens: 8192
+          }
+        })
+      });
+
+      clearTimeout(timeoutId);
+
+      if (response.ok) {
+        const data = await response.json();
+        const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (text && text.trim()) {
+          return cleanLatexSyntax(text.trim());
+        }
+      }
+    } catch (err) {
+      console.warn(`Gemini model ${model} skipped:`, err.message);
     }
-  } catch (err) {
-    console.error('Gemini API Error:', err.message);
   }
   return null;
 }
@@ -59,10 +170,13 @@ async function queryGroq(userPrompt, conversationHistory = []) {
   if (!apiKey) return null;
 
   try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8000);
+
     const messages = [
       {
         role: 'system',
-        content: `You are "My AI", a smart and conversational AI assistant (like Meta AI) inside Chit Chat Telugu. You write code, solve problems, and communicate fluently in Telugu and English.`
+        content: `You are "My AI", a friendly, ultra-smart AI companion in Chit Chat Telugu (like Meta AI on WhatsApp and Snapchat My AI). You communicate fluently in Telugu and English naturally without rigid robotic menus.`
       },
       ...conversationHistory.map(m => ({
         role: m.sender === 'user' ? 'user' : 'assistant',
@@ -77,6 +191,7 @@ async function queryGroq(userPrompt, conversationHistory = []) {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${apiKey}`
       },
+      signal: controller.signal,
       body: JSON.stringify({
         model: 'llama-3.3-70b-versatile',
         messages,
@@ -84,10 +199,12 @@ async function queryGroq(userPrompt, conversationHistory = []) {
       })
     });
 
+    clearTimeout(timeoutId);
+
     if (response.ok) {
       const data = await response.json();
       const text = data.choices?.[0]?.message?.content;
-      if (text) return text;
+      if (text && text.trim()) return text.trim();
     }
   } catch (err) {
     console.error('Groq API Error:', err.message);
@@ -254,7 +371,7 @@ async function fetchFilteredKnowledge(topic) {
   return null;
 }
 
-// 5. Main Meta AI Conversational Engine
+// 5. Main Meta AI / Snap AI Conversational Engine (Natural Fallback)
 async function generateMetaAiResponse(query, history = []) {
   const q = query.trim();
   const lower = q.toLowerCase();
@@ -263,14 +380,19 @@ async function generateMetaAiResponse(query, history = []) {
   const codeSolution = solveCodingRequest(q);
   if (codeSolution) return codeSolution;
 
-  // 2. Greetings
-  if (/^(hi|hello|hey|namaste|namaskaram|నమస్కారం|హలో|హాయ్|hola)\b/i.test(lower)) {
-    return `నమస్కారం! 🙏 నేను మీ **My AI** (Chit Chat Telugu Assistant).\n\nనేను Meta AI మరియు ChatGPT తరహాలో మీ ప్రశ్నలకు సహాయం చేయడానికి సిద్ధంగా ఉన్నాను! మీరు నన్ను:\n- 💻 కోడింగ్ & ప్రోగ్రామింగ్ (Python, JS, C++, Java)\n- 📚 చదువు, సైన్స్ & జనరల్ నాలెడ్జ్ ప్రశ్నలు\n- 🎬 సినిమా విశేషాలు & వినోదం\n- 📜 తెలుగు సామెతలు, జోకులు & కథలు\nగురించి అడగవచ్చు! మీకు ఏ సమాచారం కావాలి? ✨`;
+  // 2. Natural Greetings (No rigid robotic bullet lists)
+  if (/^(hi|hello|hey|namaste|namaskaram|నమస్కారం|హలో|హాయ్|hola|good morning|good evening|good afternoon)\b/i.test(lower)) {
+    const greetings = [
+      `హలో! 🙏 ఎలా ఉన్నారు? నేను మీ **My AI** ని. ఈ రోజు మీకు ఎలా సహాయపడగలను? ✨`,
+      `హాయ్! 👋 నేను మీ Chit Chat AI ని. ఏదైనా ప్రశ్న అడగండి లేదా సరదాగా మాట్లాడండి! 😊`,
+      `నమస్కారం! 🙏 మీకు ఏ సమాచారం కావాలన్నా లేదా ఎలాంటి సహాయం కావాలన్నా నన్ను అడగవచ్చు! 🚀`
+    ];
+    return greetings[Math.floor(Math.random() * greetings.length)];
   }
 
   // 3. Who are you
-  if (lower.includes('who are you') || lower.includes('nuvvu evaru') || lower.includes('మీరు ఎవరు')) {
-    return `🤖 నేను **My AI** — Chit Chat Telugu లో మీ స్మార్ట్ పర్సనల్ AI అసిస్టెంట్ ని!\n\nనేను ChatGPT & Meta AI తరహాలో కోడింగ్, చదువు, కవితలు, విజ్ఞానం మరియు రోజువారీ ప్రశ్నలకు తెలుగు మరియు ఇంగ్లీషులో సమాధానాలు ఇవ్వగలను. 🚀`;
+  if (lower.includes('who are you') || lower.includes('nuvvu evaru') || lower.includes('మీరు ఎవరు') || lower.includes('what are you')) {
+    return `🤖 నేను **My AI** — Chit Chat Telugu లో మీ స్మార్ట్ పర్సనల్ AI అసిస్టెంట్ ని (WhatsApp Meta AI & Snapchat My AI లాగా)!\n\nకోడింగ్, చదువు, ప్రశ్నలు, కవితలు, జోకులు లేదా ఏదైనా సరికొత్త సమాచారం తెలుసుకోవడానికి నేను ఎల్లప్పుడూ మీకు తోడుగా ఉంటాను. 🚀✨`;
   }
 
   // 4. Academic Distributed Ledger / Blockchain
@@ -298,7 +420,11 @@ async function generateMetaAiResponse(query, history = []) {
 
   // 5. Jokes & Humor
   if (lower.includes('joke') || lower.includes('జోక్') || lower.includes('comedy')) {
-    return `😂 **తెలుగు జోక్**:\nటీచర్: 'బాబూ, సైన్స్ లో నీకు ఇష్టమైన సబ్జెక్ట్ ఏది?'\nస్టూడెంట్: 'రిసెస్ బెల్ టీచర్!' 🔔🤣`;
+    const jokes = [
+      `😂 **తెలుగు జోక్**:\nటీచర్: 'బాబూ, సైన్స్ లో నీకు ఇష్టమైన సబ్జెక్ట్ ఏది?'\nస్టూడెంట్: 'రిసెస్ బెల్ టీచర్!' 🔔🤣`,
+      `😄 **జోక్**:\nఫ్రెండ్ 1: 'పరీక్షల్లో ఏమైనా రాశావా?'\nఫ్రెండ్ 2: 'పేపర్ మీద క్వశ్చన్ నెంబర్లు తప్ప ఏమీ రాయలేదు రా!'\nఫ్రెండ్ 1: 'హమ్మయ్య! ఇద్దరివీ ఒకే సమాధానాలు కాబట్టి కాపీ కొట్టామనుకోరు!' 🤣`
+    ];
+    return jokes[Math.floor(Math.random() * jokes.length)];
   }
 
   // 6. Proverb & Wisdom
@@ -310,38 +436,94 @@ async function generateMetaAiResponse(query, history = []) {
   const info = await fetchFilteredKnowledge(q);
   if (info) return info;
 
-  // 8. Natural Conversational Response
-  return `### 💡 **My AI**\n\nమీ ప్రశ్న: **"${q}"**\n\nనేను మీ సందేశాన్ని విశ్లేషించాను! మీరు మరింత సమాచారం, కోడింగ్ ఉదాహరణ లేదా వివరణ కోరుకుంటే దయచేసి వివరంగా అడగండి. నేను ఎల్లప్పుడూ మీకు సహాయం చేయడానికి సిద్ధంగా ఉన్నాను! 🤖✨`;
+  // 8. Natural Conversational Response (Warm, Direct, Helpful)
+  return `నేను మీ ప్రశ్నను గమనించాను: **"${q}"**.\n\nమీరు దీని గురించి మరింత స్పష్టంగా లేదా నిర్దిష్టమైన ఉదాహరణతో అడిగితే నేను ఇంకా ఖచ్చితమైన సమాధానం లేదా కోడింగ్ తో సహాయం చేస్తాను! 😊✨`;
+}
+
+// Helper to build Pure Ultra-Realistic Real-Life Photographic Prompts
+function buildUltraHdRealisticPrompt(rawPrompt, requestedStyle = 'photo') {
+  if (!rawPrompt) return '';
+  let p = rawPrompt.trim();
+  
+  // Clean common command prefixes
+  p = p.replace(/^(?:please\s+)?(?:generate|create|draw|make|paint|render|show me)\s+(?:an?\s+)?(?:image|picture|photo|photograph|pic|wallpaper)\s+(?:of|about|with|for)?\s*/i, '').trim();
+
+  const isArtStyle = requestedStyle === 'art' || /(anime|cartoon|sketch|drawing|illustration|oil painting|water color|pixel art|3d render|claymation|comic|vector|caricature)/i.test(p);
+  
+  if (isArtStyle) {
+    return `${p}, highly detailed, sharp crisp focus, 8k resolution`;
+  }
+
+  // Pure Real-Life Photographic Engine (Ultra-sharp, genuine camera capture, authentic human skin & lighting)
+  return `RAW 35mm color photograph of ${p}, shot on Sony A7R V with 85mm f/1.4 GM lens, 1/1000s shutter, ISO 100, bright natural daylight, crisp sharp focus, crystal clear facial features, authentic human skin texture with natural pores, hyperrealistic natural environment reflections, National Geographic style documentary photography, ultra-HD 8k resolution --no painting, drawing, sketch, cartoon, anime, 3d render, cgi, airbrush, illustration, smooth skin, plastic look, blurry, digital art, distorted`;
 }
 
 router.post('/chat', verifyTokenOptional, async (req, res) => {
   try {
-    const { message, history } = req.body;
-    if (!message || !message.trim()) {
-      return res.status(400).json({ reply: 'Please provide a message.' });
+    const { message, history, attachment, generateImage, style } = req.body;
+    
+    // Check for explicit or auto-detected image generation request
+    const promptText = (message || '').trim();
+    const detectedImgSubject = generateImage ? promptText : detectImageGenRequest(promptText);
+
+    if (detectedImgSubject) {
+      const seed = Math.floor(Math.random() * 1000000);
+      const enhancedPrompt = buildUltraHdRealisticPrompt(detectedImgSubject, style || 'photo');
+      const imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(enhancedPrompt)}?width=1024&height=1024&nologo=true&enhance=false&seed=${seed}&model=flux`;
+      
+      return res.json({
+        reply: `📸 **Ultra-HD Real-Life Photo**\n\nPrompt: **"${detectedImgSubject}"**\n\nHere is your high-definition, genuine photographic image:`,
+        generatedImage: imageUrl,
+        prompt: detectedImgSubject
+      });
     }
 
-    const query = message.trim();
+    if (!promptText && !attachment) {
+      return res.status(400).json({ reply: 'Please provide a message or attach an image/document.' });
+    }
 
-    // 1. Try Gemini API (if key present in .env)
-    const geminiReply = await queryGemini(query, history || []);
+    // 1. Try Gemini API with Multimodal Vision & Document capabilities
+    const geminiReply = await queryGemini(promptText, history || [], attachment || null);
     if (geminiReply) {
       return res.json({ reply: geminiReply });
     }
 
     // 2. Try Groq API (if key present in .env)
-    const groqReply = await queryGroq(query, history || []);
+    const groqReply = await queryGroq(promptText, history || []);
     if (groqReply) {
       return res.json({ reply: groqReply });
     }
 
     // 3. Fallback to Meta AI Reasoning Engine
-    const metaAiReply = await generateMetaAiResponse(query, history || []);
+    const metaAiReply = await generateMetaAiResponse(promptText || 'Hello', history || []);
     res.json({ reply: metaAiReply });
 
   } catch (err) {
     console.error('AI Chat Error:', err);
     res.status(500).json({ reply: 'AI Bot is currently processing. Please try again! 🤖' });
+  }
+});
+
+// Dedicated Image Generation Endpoint
+router.post('/generate-image', verifyTokenOptional, async (req, res) => {
+  try {
+    const { prompt, style } = req.body;
+    if (!prompt || !prompt.trim()) {
+      return res.status(400).json({ error: 'Prompt is required' });
+    }
+
+    const cleanPrompt = prompt.trim();
+    const seed = Math.floor(Math.random() * 1000000);
+    const enhancedPrompt = buildUltraHdRealisticPrompt(cleanPrompt, style || 'photo');
+    const imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(enhancedPrompt)}?width=1024&height=1024&nologo=true&enhance=false&seed=${seed}&model=flux`;
+
+    res.json({
+      imageUrl,
+      prompt: cleanPrompt
+    });
+  } catch (err) {
+    console.error('Image Gen Error:', err);
+    res.status(500).json({ error: 'Failed to generate image' });
   }
 });
 

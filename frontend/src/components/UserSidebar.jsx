@@ -185,6 +185,70 @@ const UserSidebar = ({ activeChat, setActiveChat, users, setUsers, onlineUsers =
            (u.username && u.username.toLowerCase().includes(s));
   });
 
+  const friendsWithStories = filteredFriends.filter(f => f.statusVideoUrl);
+
+  const renderStoriesTray = () => (
+    <div className="stories-horizontal-tray">
+      {/* My Story Bubble */}
+      {user && (
+        <div 
+          className="story-tray-item"
+          onClick={() => {
+            if (user.statusVideoUrl) {
+              setViewingStoryUrl(user.statusVideoUrl);
+            } else if (!uploadingStory) {
+              fileInputRef.current?.click();
+            }
+          }}
+          title={user.statusVideoUrl ? "Tap to view your story" : "Tap to add a story"}
+        >
+          <div className={user.statusVideoUrl ? "story-ring-green" : "story-ring-idle"}>
+            <div className="story-inner-avatar">
+              <Avatar userId={user.id || user._id} username={user.username} size={46} />
+            </div>
+            {!user.statusVideoUrl && <span className="story-plus-badge">+</span>}
+            {user.statusVideoUrl && (
+              <span 
+                className="story-plus-badge" 
+                style={{ background: '#6366f1' }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  fileInputRef.current?.click();
+                }}
+                title="Update Story"
+              >
+                +
+              </span>
+            )}
+          </div>
+          <span className="story-tray-username">
+            {uploadingStory ? 'Uploading...' : t('my_story')}
+          </span>
+        </div>
+      )}
+
+      {/* Friends' Stories Bubbles Side-by-Side */}
+      {friendsWithStories.map(u => (
+        <div
+          key={u.id || u._id}
+          className="story-tray-item"
+          onClick={() => {
+            handleRecordView(u.id || u._id);
+            setViewingStoryUrl(u.statusVideoUrl);
+          }}
+          title={`Watch ${u.username}'s story`}
+        >
+          <div className="story-ring-active">
+            <div className="story-inner-avatar">
+              <Avatar userId={u.id || u._id} username={u.username} size={46} />
+            </div>
+          </div>
+          <span className="story-tray-username">{u.username}</span>
+        </div>
+      ))}
+    </div>
+  );
+
   const handleFindStranger = () => {
     if (!user) {
       alert("Please login to chat with strangers.");
@@ -256,6 +320,14 @@ const UserSidebar = ({ activeChat, setActiveChat, users, setUsers, onlineUsers =
         {/* ========== CHATS TAB ========== */}
         {activeTab === 'chats' && (
           <>
+            {/* Stories Tray in Chats */}
+            {user && (user.statusVideoUrl || friendsWithStories.length > 0) && (
+              <>
+                <div className="sidebar-section-label" style={{ paddingBottom: 2 }}>{t('stories')}</div>
+                {renderStoriesTray()}
+              </>
+            )}
+
             {/* Stranger Chat Matchmaking */}
             {user && (
               <div 
@@ -384,57 +456,65 @@ const UserSidebar = ({ activeChat, setActiveChat, users, setUsers, onlineUsers =
         {/* ========== GROUPS TAB ========== */}
         {activeTab === 'groups' && (
           <>
-            <button 
-              className="btn-primary" 
-              style={{ width: '100%', marginBottom: '15px' }}
-              onClick={() => setShowCreateGroup(true)}
-            >
-              + Create New Group
-            </button>
-            <div className="users-list">
-              {myGroups.length === 0 ? (
-                <div style={{ textAlign: 'center', color: '#888', marginTop: '20px' }}>
-                  You are not in any groups yet.
-                </div>
-              ) : (
-                myGroups.map(group => (
+            <div className="sidebar-section-label">{t('groups')}</div>
+            {user && (
+              <button 
+                className="sidebar-profile-btn" 
+                onClick={() => setShowCreateGroup(true)}
+                style={{ width: 'calc(100% - 20px)', margin: '0 10px 10px 10px', justifyContent: 'center' }}
+              >
+                + Create New Group
+              </button>
+            )}
+            
+            {myGroups.length === 0 ? (
+              <div className="no-users">No groups found</div>
+            ) : (
+              myGroups.map(group => (
+                <div
+                  key={group.id}
+                  className={`sidebar-item ${activeChat === group.id ? 'active' : ''}`}
+                  onClick={() => setActiveChat(group.id)}
+                >
                   <div 
-                    key={group.id} 
-                    className={`sidebar-item ${activeChat === group.id ? 'active' : ''}`}
-                    onClick={() => setActiveChat(group.id)}
+                    className="avatar avatar-public" 
+                    style={{
+                      background: group.avatar_url ? 'transparent' : 'linear-gradient(135deg, #7c6ff7, #ec4899)',
+                      overflow: 'hidden', padding: 0,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center'
+                    }}
                   >
-                    <div style={{ position: 'relative' }}>
-                      <div className="avatar avatar-public" style={{ width: 44, height: 44, fontSize: '1.2rem', background: '#e91e63' }}>
-                        👥
-                      </div>
+                    {group.avatar_url ? (
+                      <img src={group.avatar_url} alt={group.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                    ) : (
+                      '👥'
+                    )}
+                  </div>
+                  <div className="sidebar-item-meta">
+                    <div className="sidebar-item-top" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+                      <span className="sidebar-item-name">{group.name}</span>
+                      {group.myRole === 'admin' && (
+                        <span style={{ fontSize: '0.65rem', background: 'rgba(0, 168, 132, 0.2)', color: '#00a884', padding: '1px 6px', borderRadius: '6px', fontWeight: 700 }}>
+                          Admin
+                        </span>
+                      )}
                     </div>
-                    <div className="sidebar-item-meta" style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
-                        <div className="sidebar-item-name">{group.name}</div>
-                        {unreadCounts[group.id] > 0 && (
-                          <div style={{
-                            background: '#25d366', color: 'white', borderRadius: '10px',
-                            padding: '2px 6px', fontSize: '0.7rem', fontWeight: 'bold'
-                          }}>
-                            {unreadCounts[group.id] > 9 ? '9+' : unreadCounts[group.id]}
-                          </div>
-                        )}
-                      </div>
-                      <div className="sidebar-item-status">Group Chat</div>
+                    <div className="sidebar-item-status">
+                      {group.description || 'Group Chat'}
                     </div>
                   </div>
-                ))
-              )}
-            </div>
+                </div>
+              ))
+            )}
           </>
         )}
 
         {/* ========== REQUESTS TAB ========== */}
         {activeTab === 'requests' && (
           <>
-            <div className="sidebar-section-label">Pending Friend Requests</div>
+            <div className="sidebar-section-label">{t('requests')}</div>
             {friendRequests.length === 0 && (
-              <div className="no-users">No pending requests 🎉</div>
+              <div className="no-users">No pending friend requests</div>
             )}
             {friendRequests.map(u => (
               <div key={u.id || u._id} className="sidebar-item" style={{ flexDirection: 'column', alignItems: 'flex-start' }}>
@@ -464,7 +544,7 @@ const UserSidebar = ({ activeChat, setActiveChat, users, setUsers, onlineUsers =
               <div 
                 className="sidebar-item" 
                 onClick={() => !uploadingStory && fileInputRef.current?.click()}
-                style={{ background: 'rgba(255,255,255,0.05)' }}
+                style={{ background: 'rgba(255,255,255,0.05)', cursor: 'pointer' }}
               >
                 <div style={{ position: 'relative' }}>
                   <Avatar userId={user.id || user._id} username={user.username} size={44} />
@@ -517,32 +597,32 @@ const UserSidebar = ({ activeChat, setActiveChat, users, setUsers, onlineUsers =
             ) : (
               <div className="no-users">Login to post a story</div>
             )}
-            
-            <div className="sidebar-section-label" style={{ marginTop: '20px' }}>{t('friends_stories')}</div>
-            {filteredFriends.filter(f => f.statusVideoUrl).length === 0 ? (
-              <div className="no-users">{t('no_recent_stories')}</div>
-            ) : (
-              filteredFriends.filter(f => f.statusVideoUrl).map(u => (
-                <div 
-                  key={u.id || u._id} 
-                  className="sidebar-item" 
-                  onClick={() => {
-                    handleRecordView(u.id || u._id);
-                    setViewingStoryUrl(u.statusVideoUrl);
-                  }}
-                  style={{ cursor: 'pointer' }}
-                >
-                  <div style={{ position: 'relative', padding: '2px', border: '2px solid #25d366', borderRadius: '50%' }}>
-                    <Avatar userId={u.id || u._id} username={u.username} size={40} />
-                  </div>
-                  <div className="sidebar-item-meta">
-                    <div className="sidebar-item-name">{u.username}</div>
-                    <div className="sidebar-item-status">
-                      <span style={{ color: '#25d366' }}>▶ View Story</span>
+
+            {/* If friends have stories, show them side-by-side horizontally */}
+            {friendsWithStories.length > 0 && (
+              <>
+                <div className="sidebar-section-label" style={{ marginTop: '16px' }}>{t('friends_stories')}</div>
+                <div className="stories-horizontal-tray">
+                  {friendsWithStories.map(u => (
+                    <div
+                      key={u.id || u._id}
+                      className="story-tray-item"
+                      onClick={() => {
+                        handleRecordView(u.id || u._id);
+                        setViewingStoryUrl(u.statusVideoUrl);
+                      }}
+                      title={`Watch ${u.username}'s story`}
+                    >
+                      <div className="story-ring-active">
+                        <div className="story-inner-avatar">
+                          <Avatar userId={u.id || u._id} username={u.username} size={46} />
+                        </div>
+                      </div>
+                      <span className="story-tray-username">{u.username}</span>
                     </div>
-                  </div>
+                  ))}
                 </div>
-              ))
+              </>
             )}
           </>
         )}
