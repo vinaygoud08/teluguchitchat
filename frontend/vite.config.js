@@ -13,8 +13,7 @@ export default defineConfig(({ command }) => ({
     ...(command === 'serve' ? [basicSsl()] : [])
   ],
   build: {
-    outDir: '../dist',
-    emptyOutDir: true,
+    outDir: 'dist',
     chunkSizeWarningLimit: 1500,
     rollupOptions: {
       output: {
