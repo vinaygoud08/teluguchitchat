@@ -43,6 +43,7 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 const onlineUsers = new Map(); // socket.id -> userId
 const onlineUsersSet = new Set(); // Set of userIds currently online
 let strangerQueue = []; // Array of { socketId, userId }
+const activeGroupCalls = new Map(); // groupId -> { groupId, groupName, callType, initiator: { id, username }, participants: Map(userId -> { id, username, socketId }) }
 
 io.on('connection', (socket) => {
   console.log('A user connected:', socket.id);
@@ -279,6 +280,148 @@ io.on('connection', (socket) => {
     io.to(data.to).emit('call_declined');
   });
 
+  // ================= GROUP CALL SIGNALING =================
+  socket.on('join_group_call', (data) => {
+    const { groupId, groupName, user, callType } = data;
+    if (!groupId || !user) return;
+
+    const callRoom = 'group_call_' + groupId;
+    socket.join(callRoom);
+
+    let call = activeGroupCalls.get(groupId);
+    if (!call) {
+      call = {
+        groupId,
+        groupName: groupName || 'Group Call',
+        callType: callType || 'video',
+        initiator: { id: user.id || user._id, username: user.username },
+        participants: new Map(),
+        startedAt: new Date().toISOString()
+      };
+      activeGroupCalls.set(groupId, call);
+    }
+
+    const userId = user.id || user._id;
+    const existingParticipants = Array.from(call.participants.values()).filter(p => p.userId !== userId);
+
+    call.participants.set(userId, {
+      userId,
+      username: user.username,
+      socketId: socket.id,
+      callType: callType || call.callType
+    });
+
+    console.log(`[Group Call] User ${user.username} (${socket.id}) joined group call ${groupId}. Total participants: ${call.participants.size}`);
+
+    // Send existing participants to the joiner
+    socket.emit('group_call_joined', {
+      groupId,
+      groupName: call.groupName,
+      callType: call.callType,
+      initiator: call.initiator,
+      participants: existingParticipants
+    });
+
+    // Notify other participants in the call room
+    socket.to(callRoom).emit('group_call_user_joined', {
+      userId,
+      username: user.username,
+      socketId: socket.id,
+      callType: callType || call.callType
+    });
+
+    // Notify all members of this group that an active group call is in progress
+    io.to(groupId).emit('group_call_status_update', {
+      groupId,
+      groupName: call.groupName,
+      callType: call.callType,
+      initiator: call.initiator,
+      isActive: true,
+      participantsCount: call.participants.size
+    });
+  });
+
+  socket.on('group_call_signal', (data) => {
+    const { toSocketId, fromUserId, fromUsername, signal, callType, groupId } = data;
+    if (toSocketId) {
+      io.to(toSocketId).emit('group_call_signal', {
+        fromSocketId: socket.id,
+        fromUserId,
+        fromUsername,
+        signal,
+        callType,
+        groupId
+      });
+    }
+  });
+
+  socket.on('group_call_ice_candidate', (data) => {
+    const { toSocketId, fromUserId, candidate, groupId } = data;
+    if (toSocketId) {
+      io.to(toSocketId).emit('group_call_ice_candidate', {
+        fromSocketId: socket.id,
+        fromUserId,
+        candidate,
+        groupId
+      });
+    }
+  });
+
+  socket.on('leave_group_call', (data) => {
+    const { groupId, userId } = data;
+    const uid = userId || onlineUsers.get(socket.id);
+    if (!groupId || !uid) return;
+
+    const callRoom = 'group_call_' + groupId;
+    socket.leave(callRoom);
+
+    const call = activeGroupCalls.get(groupId);
+    if (call) {
+      call.participants.delete(uid);
+      console.log(`[Group Call] User ${uid} left group call ${groupId}. Remaining: ${call.participants.size}`);
+
+      io.to(callRoom).emit('group_call_user_left', {
+        userId: uid,
+        socketId: socket.id
+      });
+
+      if (call.participants.size === 0) {
+        activeGroupCalls.delete(groupId);
+        io.to(groupId).emit('group_call_ended', { groupId });
+        io.to(groupId).emit('group_call_status_update', {
+          groupId,
+          isActive: false,
+          participantsCount: 0
+        });
+      } else {
+        io.to(groupId).emit('group_call_status_update', {
+          groupId,
+          groupName: call.groupName,
+          callType: call.callType,
+          initiator: call.initiator,
+          isActive: true,
+          participantsCount: call.participants.size
+        });
+      }
+    }
+  });
+
+  socket.on('get_active_group_calls', () => {
+    const activeCallsList = [];
+    for (const [groupId, call] of activeGroupCalls.entries()) {
+      if (call.participants.size > 0) {
+        activeCallsList.push({
+          groupId,
+          groupName: call.groupName,
+          callType: call.callType,
+          initiator: call.initiator,
+          participantsCount: call.participants.size
+        });
+      }
+    }
+    socket.emit('active_group_calls_list', activeCallsList);
+  });
+
   // Clear chat — notify the other user's socket room
   socket.on('clear_chat', (data) => {
     const { room, chatKey, otherUserId } = data;
@@ -339,6 +482,32 @@ io.on('connection', (socket) => {
     
     // Remove from stranger queue if they were waiting
     strangerQueue = strangerQueue.filter(u => u.socketId !== socket.id);
+
+    // Remove from any active group calls
+    for (const [groupId, call] of activeGroupCalls.entries()) {
+      for (const [pUserId, pData] of call.participants.entries()) {
+        if (pData.socketId === socket.id) {
+          call.participants.delete(pUserId);
+          const callRoom = 'group_call_' + groupId;
+          io.to(callRoom).emit('group_call_user_left', { userId: pUserId, socketId: socket.id });
+          if (call.participants.size === 0) {
+            activeGroupCalls.delete(groupId);
+            io.to(groupId).emit('group_call_ended', { groupId });
+            io.to(groupId).emit('group_call_status_update', { groupId, isActive: false, participantsCount: 0 });
+          } else {
+            io.to(groupId).emit('group_call_status_update', {
+              groupId,
+              groupName: call.groupName,
+              callType: call.callType,
+              initiator: call.initiator,
+              isActive: true,
+              participantsCount: call.participants.size
+            });
+          }
+          break;
+        }
+      }
+    }
 
     const userId = onlineUsers.get(socket.id);
     if (userId) {

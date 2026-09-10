@@ -9,7 +9,21 @@ import StoryViewerModal from './StoryViewerModal';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
 
-const UserSidebar = ({ activeChat, setActiveChat, users, setUsers, onlineUsers = new Set(), mobileSidebarOpen = true, socket, isSearchingStranger, setIsSearchingStranger, myGroups, setMyGroups, unreadCounts = {} }) => {
+const UserSidebar = ({
+  activeChat,
+  setActiveChat,
+  users,
+  setUsers,
+  onlineUsers = new Set(),
+  mobileSidebarOpen = true,
+  socket,
+  isSearchingStranger,
+  setIsSearchingStranger,
+  myGroups = [],
+  setMyGroups,
+  unreadCounts = {},
+  activeGroupCalls = {}
+}) => {
   const { user, token, setUser } = useAuth();
   const { t } = useLanguage();
   const [activeTab, setActiveTab] = useState('chats'); // 'chats', 'friends', 'requests', 'groups', 'stories'
@@ -425,6 +439,56 @@ const UserSidebar = ({ activeChat, setActiveChat, users, setUsers, onlineUsers =
               </div>
             )}
 
+            {user && search && myGroups.filter(g => (g.name || '').toLowerCase().includes(search.toLowerCase())).length > 0 && (
+              <>
+                <div className="sidebar-section-label" style={{ marginTop: '16px' }}>Matching Groups</div>
+                {myGroups
+                  .filter(g => (g.name || '').toLowerCase().includes(search.toLowerCase()))
+                  .map(group => {
+                    const hasActiveCall = activeGroupCalls[group.id]?.isActive;
+                    return (
+                      <div
+                        key={group.id}
+                        className={`sidebar-item ${activeChat === group.id ? 'active' : ''}`}
+                        onClick={() => setActiveChat(group.id)}
+                      >
+                        <div 
+                          className="avatar avatar-public" 
+                          style={{
+                            background: group.avatar_url ? 'transparent' : 'linear-gradient(135deg, #7c6ff7, #ec4899)',
+                            overflow: 'hidden', padding: 0,
+                            display: 'flex', alignItems: 'center', justifyContent: 'center'
+                          }}
+                        >
+                          {group.avatar_url ? (
+                            <img src={group.avatar_url} alt={group.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                          ) : (
+                            '👥'
+                          )}
+                        </div>
+                        <div className="sidebar-item-meta">
+                          <div className="sidebar-item-top" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+                            <span className="sidebar-item-name">{group.name}</span>
+                            {hasActiveCall ? (
+                              <span style={{ fontSize: '0.68rem', background: 'rgba(34, 197, 94, 0.2)', color: '#22c55e', padding: '1px 6px', borderRadius: '6px', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                <span className="pulsing-live-dot" style={{ width: 6, height: 6 }} /> Call
+                              </span>
+                            ) : group.myRole === 'admin' && (
+                              <span style={{ fontSize: '0.65rem', background: 'rgba(0, 168, 132, 0.2)', color: '#00a884', padding: '1px 6px', borderRadius: '6px', fontWeight: 700 }}>
+                                Admin
+                              </span>
+                            )}
+                          </div>
+                          <div className="sidebar-item-status">
+                            {group.description || 'Group Chat'}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+              </>
+            )}
+
             {user && search && searchedUsers.length > 0 && (
               <>
                 <div className="sidebar-section-label" style={{ marginTop: '20px' }}>Global Search Results</div>
@@ -467,44 +531,55 @@ const UserSidebar = ({ activeChat, setActiveChat, users, setUsers, onlineUsers =
               </button>
             )}
             
-            {myGroups.length === 0 ? (
-              <div className="no-users">No groups found</div>
+            {myGroups.filter(g => (g.name || '').toLowerCase().includes(search.toLowerCase()) || (g.description || '').toLowerCase().includes(search.toLowerCase())).length === 0 ? (
+              <div className="no-users">
+                {search ? `No groups matching "${search}"` : 'No groups found'}
+              </div>
             ) : (
-              myGroups.map(group => (
-                <div
-                  key={group.id}
-                  className={`sidebar-item ${activeChat === group.id ? 'active' : ''}`}
-                  onClick={() => setActiveChat(group.id)}
-                >
-                  <div 
-                    className="avatar avatar-public" 
-                    style={{
-                      background: group.avatar_url ? 'transparent' : 'linear-gradient(135deg, #7c6ff7, #ec4899)',
-                      overflow: 'hidden', padding: 0,
-                      display: 'flex', alignItems: 'center', justifyContent: 'center'
-                    }}
-                  >
-                    {group.avatar_url ? (
-                      <img src={group.avatar_url} alt={group.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                    ) : (
-                      '👥'
-                    )}
-                  </div>
-                  <div className="sidebar-item-meta">
-                    <div className="sidebar-item-top" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
-                      <span className="sidebar-item-name">{group.name}</span>
-                      {group.myRole === 'admin' && (
-                        <span style={{ fontSize: '0.65rem', background: 'rgba(0, 168, 132, 0.2)', color: '#00a884', padding: '1px 6px', borderRadius: '6px', fontWeight: 700 }}>
-                          Admin
-                        </span>
-                      )}
+              myGroups
+                .filter(g => (g.name || '').toLowerCase().includes(search.toLowerCase()) || (g.description || '').toLowerCase().includes(search.toLowerCase()))
+                .map(group => {
+                  const hasActiveCall = activeGroupCalls[group.id]?.isActive;
+                  return (
+                    <div
+                      key={group.id}
+                      className={`sidebar-item ${activeChat === group.id ? 'active' : ''}`}
+                      onClick={() => setActiveChat(group.id)}
+                    >
+                      <div 
+                        className="avatar avatar-public" 
+                        style={{
+                          background: group.avatar_url ? 'transparent' : 'linear-gradient(135deg, #7c6ff7, #ec4899)',
+                          overflow: 'hidden', padding: 0,
+                          display: 'flex', alignItems: 'center', justifyContent: 'center'
+                        }}
+                      >
+                        {group.avatar_url ? (
+                          <img src={group.avatar_url} alt={group.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                        ) : (
+                          '👥'
+                        )}
+                      </div>
+                      <div className="sidebar-item-meta">
+                        <div className="sidebar-item-top" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+                          <span className="sidebar-item-name">{group.name}</span>
+                          {hasActiveCall ? (
+                            <span style={{ fontSize: '0.68rem', background: 'rgba(34, 197, 94, 0.2)', color: '#22c55e', padding: '1px 6px', borderRadius: '6px', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '4px' }}>
+                              <span className="pulsing-live-dot" style={{ width: 6, height: 6 }} /> Call
+                            </span>
+                          ) : group.myRole === 'admin' && (
+                            <span style={{ fontSize: '0.65rem', background: 'rgba(0, 168, 132, 0.2)', color: '#00a884', padding: '1px 6px', borderRadius: '6px', fontWeight: 700 }}>
+                              Admin
+                            </span>
+                          )}
+                        </div>
+                        <div className="sidebar-item-status">
+                          {group.description || 'Group Chat'}
+                        </div>
+                      </div>
                     </div>
-                    <div className="sidebar-item-status">
-                      {group.description || 'Group Chat'}
-                    </div>
-                  </div>
-                </div>
-              ))
+                  );
+                })
             )}
           </>
         )}

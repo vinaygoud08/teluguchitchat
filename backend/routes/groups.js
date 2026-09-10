@@ -183,7 +183,7 @@ router.get('/:id/details', verifyToken, async (req, res) => {
       .from('group_members')
       .select(`
         user_id, role, joined_at,
-        users ( id, username, email, profilePicUrl, statusVideoUrl )
+        users ( id, username, email, profileSongUrl, statusVideoUrl )
       `)
       .eq('group_id', groupId);
 
@@ -221,7 +221,7 @@ router.get('/:id/members', verifyToken, async (req, res) => {
       .from('group_members')
       .select(`
         user_id, role, joined_at,
-        users ( id, username, email, profilePicUrl, statusVideoUrl )
+        users ( id, username, email, profileSongUrl, statusVideoUrl )
       `)
       .eq('group_id', req.params.id);
 
@@ -326,8 +326,16 @@ router.post('/:id/members', verifyToken, async (req, res) => {
   }
 
   try {
+    // Check if requester is creator or admin/member
+    const { data: groupData } = await supabase
+      .from('groups')
+      .select('created_by')
+      .eq('id', groupId)
+      .single();
+
+    const isCreator = groupData && groupData.created_by === req.user.id;
     const role = await getMemberRole(groupId, req.user.id);
-    if (!role) return res.status(403).json({ msg: 'You are not a member of this group' });
+    if (!isCreator && !role) return res.status(403).json({ msg: 'You are not a member or creator of this group' });
 
     // Insert new members
     const membersToInsert = memberIds.map(id => ({

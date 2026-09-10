@@ -2,7 +2,7 @@ import React, { useEffect, useState, useRef, memo } from 'react';
 import axios from 'axios';
 import MessageInput from './MessageInput';
 import { useAuth } from '../context/AuthContext';
-import { User, UserRound, CircleUser, Phone, Video } from 'lucide-react';
+import { User, UserRound, CircleUser, Phone, Video, Search, MoreVertical, UserPlus, Info, LogOut, X, ChevronUp, ChevronDown } from 'lucide-react';
 import Avatar from './Avatar';
 import GroupInfoModal from './GroupInfoModal';
 import ImageViewerModal from './ImageViewerModal';
@@ -172,16 +172,35 @@ const MessageItem = memo(({ msg, isSelf, senderUser, senderColor, senderIcon, on
   );
 });
 
-const ChatBox = ({ socket, activeChat, onInitiateCall, users = [], myGroups = [], onlineUsers = new Set(), onBackToSidebar, strangerUserIds }) => {
+const ChatBox = ({
+  socket,
+  activeChat,
+  onInitiateCall,
+  onInitiateGroupCall,
+  activeGroupCalls = {},
+  users = [],
+  myGroups = [],
+  setMyGroups,
+  onlineUsers = new Set(),
+  onBackToSidebar,
+  strangerUserIds
+}) => {
   const { user, token } = useAuth();
   const [messages, setMessages] = useState({ home: [] }); // room -> messages array
   const [strangerLeft, setStrangerLeft] = useState(false);
   const [showRestartWarning, setShowRestartWarning] = useState(false);
   const [showGroupInfo, setShowGroupInfo] = useState(false);
+  const [groupMenuAddMode, setGroupMenuAddMode] = useState(false);
+  const [showGroupMenu, setShowGroupMenu] = useState(false);
   const [pendingCall, setPendingCall] = useState(null);
   const [isClearing, setIsClearing] = useState(false);
   const [viewingImage, setViewingImage] = useState(null);
   const [viewingProfile, setViewingProfile] = useState(null);
+
+  // In-Chat Search State
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [currentMatchIndex, setCurrentMatchIndex] = useState(0);
   
   // Context Menu & Replies
   const [contextMenu, setContextMenu] = useState(null);
@@ -190,6 +209,30 @@ const ChatBox = ({ socket, activeChat, onInitiateCall, users = [], myGroups = []
   const [copiedToast, setCopiedToast] = useState(false);
   
   const messagesEndRef = useRef(null);
+  const groupMenuRef = useRef(null);
+
+  // Close group dropdown menu on outside click
+  useEffect(() => {
+    const handleOutsideClick = (e) => {
+      if (groupMenuRef.current && !groupMenuRef.current.contains(e.target)) {
+        setShowGroupMenu(false);
+      }
+    };
+    if (showGroupMenu) {
+      document.addEventListener('mousedown', handleOutsideClick);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleOutsideClick);
+    };
+  }, [showGroupMenu]);
+
+  // Reset search when chat changes
+  useEffect(() => {
+    setIsSearchOpen(false);
+    setSearchQuery('');
+    setCurrentMatchIndex(0);
+    setShowGroupMenu(false);
+  }, [activeChat]);
 
   // Get the other user's info when in private chat
   const isStrangerChat = activeChat ? activeChat.startsWith('stranger_') : false;
@@ -472,6 +515,15 @@ const ChatBox = ({ socket, activeChat, onInitiateCall, users = [], myGroups = []
         </div>
 
         <div className="chat-header-actions">
+          {/* In-Chat Search Button (Available in all chats) */}
+          <button
+            className={`chat-header-btn ${isSearchOpen ? 'active' : ''}`}
+            onClick={() => setIsSearchOpen(!isSearchOpen)}
+            title="Search in conversation"
+          >
+            <Search size={19} />
+          </button>
+
           {activeChat === 'home' ? (
             <button className="chat-header-btn restart-btn" onClick={() => setMessages(prev => ({ ...prev, home: [] }))}>🔄 Clear</button>
           ) : isStrangerChat ? (
@@ -479,22 +531,148 @@ const ChatBox = ({ socket, activeChat, onInitiateCall, users = [], myGroups = []
               <button className="chat-header-btn" onClick={handleAddStranger}>➕ Add Friend</button>
               <button className="chat-header-btn restart-btn" onClick={handleLeaveStranger}>❌ Leave</button>
             </>
-          ) : !activeGroup ? (
+          ) : activeGroup ? (
+            <>
+              {/* Group Voice Call Button */}
+              <button
+                className="chat-header-btn"
+                onClick={() => onInitiateGroupCall && onInitiateGroupCall(activeGroup.id, activeGroup.name, 'audio')}
+                title="Group Voice Call"
+              >
+                <Phone size={19} />
+              </button>
+
+              {/* Group Video Call Button */}
+              <button
+                className="chat-header-btn"
+                onClick={() => onInitiateGroupCall && onInitiateGroupCall(activeGroup.id, activeGroup.name, 'video')}
+                title="Group Video Call"
+              >
+                <Video size={19} />
+              </button>
+
+              {/* Three-Dots Menu Button */}
+              <div style={{ position: 'relative' }} ref={groupMenuRef}>
+                <button
+                  className={`chat-header-btn ${showGroupMenu ? 'active' : ''}`}
+                  onClick={() => setShowGroupMenu(!showGroupMenu)}
+                  title="Group Settings & Options"
+                >
+                  <MoreVertical size={20} />
+                </button>
+
+                {showGroupMenu && (
+                  <div className="group-three-dots-dropdown">
+                    <button onClick={() => { setShowGroupInfo(true); setGroupMenuAddMode(false); setShowGroupMenu(false); }}>
+                      <Info size={16} />
+                      <span>Group Info & Settings</span>
+                    </button>
+                    <button onClick={() => { setShowGroupInfo(true); setGroupMenuAddMode(true); setShowGroupMenu(false); }}>
+                      <UserPlus size={16} />
+                      <span>Add Participants</span>
+                    </button>
+                    <button onClick={() => { setIsSearchOpen(true); setShowGroupMenu(false); }}>
+                      <Search size={16} />
+                      <span>Search Messages</span>
+                    </button>
+                    <button onClick={() => { onInitiateGroupCall && onInitiateGroupCall(activeGroup.id, activeGroup.name, 'audio'); setShowGroupMenu(false); }}>
+                      <Phone size={16} />
+                      <span>Group Voice Call</span>
+                    </button>
+                    <button onClick={() => { onInitiateGroupCall && onInitiateGroupCall(activeGroup.id, activeGroup.name, 'video'); setShowGroupMenu(false); }}>
+                      <Video size={16} />
+                      <span>Group Video Call</span>
+                    </button>
+                    <div className="dropdown-divider" />
+                    <button className="dropdown-danger" onClick={() => { setShowGroupInfo(true); setShowGroupMenu(false); }}>
+                      <LogOut size={16} />
+                      <span>Exit / Delete Group</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+            </>
+          ) : (
             <>
               <button className="chat-header-btn" onClick={() => setPendingCall('audio')} title="Voice Call"><Phone size={20} /></button>
               <button className="chat-header-btn" onClick={() => setPendingCall('video')} title="Video Call"><Video size={20} /></button>
             </>
-          ) : null}
+          )}
         </div>
       </div>
     );
   };
+
+  // Find matching message indices for in-chat search
+  const matchingMessageIndices = currentMessages
+    .map((m, idx) => (m.text && searchQuery.trim() && m.text.toLowerCase().includes(searchQuery.trim().toLowerCase()) ? idx : -1))
+    .filter(idx => idx !== -1);
 
   const pinnedMessage = [...currentMessages].reverse().find(m => m.is_pinned);
 
   return (
     <div className="chat-container">
       {renderHeader()}
+
+      {/* Active Group Call Banner */}
+      {activeGroup && activeGroupCalls && activeGroupCalls[activeGroup.id] && activeGroupCalls[activeGroup.id].isActive && (
+        <div className="active-group-call-banner">
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span className="pulsing-live-dot" />
+            <strong style={{ color: '#22c55e' }}>Group {activeGroupCalls[activeGroup.id].callType === 'video' ? 'Video' : 'Voice'} Call In Progress</strong>
+            <span style={{ opacity: 0.85, fontSize: '0.82rem' }}>({activeGroupCalls[activeGroup.id].participantsCount} joined)</span>
+          </div>
+          <button
+            className="btn-join-group-call"
+            onClick={() => onInitiateGroupCall && onInitiateGroupCall(activeGroup.id, activeGroup.name, activeGroupCalls[activeGroup.id].callType)}
+          >
+            Join Call 📞
+          </button>
+        </div>
+      )}
+
+      {/* In-Chat Message Search Bar */}
+      {isSearchOpen && (
+        <div className="in-chat-search-bar">
+          <Search size={16} color="#8696a0" />
+          <input
+            type="text"
+            placeholder="Search messages in conversation..."
+            value={searchQuery}
+            onChange={e => {
+              setSearchQuery(e.target.value);
+              setCurrentMatchIndex(0);
+            }}
+            autoFocus
+          />
+          {searchQuery && (
+            <span className="search-match-counter">
+              {matchingMessageIndices.length > 0
+                ? `${currentMatchIndex + 1} of ${matchingMessageIndices.length}`
+                : '0 matches'}
+            </span>
+          )}
+          {matchingMessageIndices.length > 0 && (
+            <div className="search-nav-buttons">
+              <button
+                onClick={() => setCurrentMatchIndex(prev => (prev > 0 ? prev - 1 : matchingMessageIndices.length - 1))}
+                title="Previous match"
+              >
+                <ChevronUp size={16} />
+              </button>
+              <button
+                onClick={() => setCurrentMatchIndex(prev => (prev < matchingMessageIndices.length - 1 ? prev + 1 : 0))}
+                title="Next match"
+              >
+                <ChevronDown size={16} />
+              </button>
+            </div>
+          )}
+          <button className="search-close-btn" onClick={() => { setIsSearchOpen(false); setSearchQuery(''); }}>
+            <X size={16} />
+          </button>
+        </div>
+      )}
 
       {pinnedMessage && (
         <div style={{
@@ -903,6 +1081,34 @@ const ChatBox = ({ socket, activeChat, onInitiateCall, users = [], myGroups = []
             </div>
           </div>
         </div>
+      )}
+
+      {showGroupInfo && activeGroup && (
+        <GroupInfoModal
+          group={activeGroup}
+          initialAddMode={groupMenuAddMode}
+          onClose={() => {
+            setShowGroupInfo(false);
+            setGroupMenuAddMode(false);
+          }}
+          onGroupUpdated={(updated) => {
+            if (setMyGroups) {
+              setMyGroups(prev => prev.map(g => g.id === updated.id ? { ...g, ...updated } : g));
+            }
+          }}
+          onGroupDeleted={(deletedId) => {
+            if (setMyGroups) {
+              setMyGroups(prev => prev.filter(g => g.id !== deletedId));
+            }
+            if (onBackToSidebar) onBackToSidebar();
+          }}
+          onInitiateCall={(callType) => {
+            setShowGroupInfo(false);
+            if (onInitiateGroupCall) {
+              onInitiateGroupCall(activeGroup.id, activeGroup.name, callType);
+            }
+          }}
+        />
       )}
 
       {viewingProfile && (

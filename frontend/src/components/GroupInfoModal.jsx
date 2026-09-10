@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import Avatar from './Avatar';
 import './AccountModal.css';
 
-const GroupInfoModal = ({ group, onClose, onGroupUpdated, onGroupDeleted, onInitiateCall }) => {
+const GroupInfoModal = ({ group, onClose, onGroupUpdated, onGroupDeleted, onInitiateCall, initialAddMode = false }) => {
   const { token, user } = useAuth();
   const [details, setDetails] = useState(group);
   const [members, setMembers] = useState([]);
@@ -63,7 +63,10 @@ const GroupInfoModal = ({ group, onClose, onGroupUpdated, onGroupDeleted, onInit
 
   useEffect(() => {
     fetchGroupDetails();
-  }, [group.id, token]);
+    if (initialAddMode) {
+      handleOpenAddMembers();
+    }
+  }, [group.id, token, initialAddMode]);
 
   // Upload Group Avatar
   const handleAvatarUpload = async (e) => {
@@ -148,17 +151,39 @@ const GroupInfoModal = ({ group, onClose, onGroupUpdated, onGroupDeleted, onInit
     }
   };
 
-  // Open Add Members modal & fetch friends
+  const [searchAddUser, setSearchAddUser] = useState('');
+  const [availableUsers, setAvailableUsers] = useState([]);
+
+  // Open Add Members modal & fetch friends and all users
   const handleOpenAddMembers = async () => {
     setShowAddMembersModal(true);
     setLoadingFriends(true);
     try {
-      const res = await axios.get('/api/users/me', {
-        headers: { 'x-auth-token': token }
-      });
-      const allFriends = res.data.friends || [];
+      const [meRes, allUsersRes] = await Promise.all([
+        axios.get('/api/users/me', { headers: { 'x-auth-token': token } }).catch(() => ({ data: {} })),
+        axios.get('/api/users', { headers: { 'x-auth-token': token } }).catch(() => ({ data: [] }))
+      ]);
+
+      const myFriends = meRes.data?.friends || [];
+      const allUsers = Array.isArray(allUsersRes.data) ? allUsersRes.data : [];
       const currentMemberIds = new Set(members.map(m => m.id || m._id));
-      setFriends(allFriends.filter(f => !currentMemberIds.has(f.id || f._id)));
+
+      // Combine friends and all users, avoiding duplicates and excluding current members & self
+      const candidatesMap = new Map();
+      myFriends.forEach(f => {
+        const id = f.id || f._id;
+        if (id && id !== myId && !currentMemberIds.has(id)) {
+          candidatesMap.set(id, { ...f, id, isFriend: true });
+        }
+      });
+      allUsers.forEach(u => {
+        const id = u.id || u._id;
+        if (id && id !== myId && !currentMemberIds.has(id) && !candidatesMap.has(id)) {
+          candidatesMap.set(id, { ...u, id, isFriend: false });
+        }
+      });
+
+      setAvailableUsers(Array.from(candidatesMap.values()));
     } catch (err) {
       console.error(err);
     } finally {
@@ -518,20 +543,21 @@ const GroupInfoModal = ({ group, onClose, onGroupUpdated, onGroupDeleted, onInit
               {filteredMembers.map(m => {
                 const memberId = m.id || m._id;
                 const isMe = memberId === myId;
+                const memberIsCreator = memberId === details.created_by;
                 const memberIsAdmin = m.role === 'admin';
 
                 return (
                   <div 
                     key={memberId}
                     onClick={() => {
-                      if (isAdmin && !isMe) {
+                      if ((isAdmin || isCreator) && !isMe) {
                         setSelectedMemberAction(m);
                       }
                     }}
                     style={{
                       display: 'flex', alignItems: 'center', gap: '12px',
                       padding: '10px 8px', borderRadius: '8px',
-                      cursor: (isAdmin && !isMe) ? 'pointer' : 'default',
+                      cursor: ((isAdmin || isCreator) && !isMe) ? 'pointer' : 'default',
                       background: selectedMemberAction?.id === memberId ? 'rgba(0,168,132,0.12)' : 'transparent',
                       transition: 'background 0.15s ease'
                     }}
@@ -551,19 +577,34 @@ const GroupInfoModal = ({ group, onClose, onGroupUpdated, onGroupDeleted, onInit
                       </div>
                     </div>
 
-                    {memberIsAdmin && (
-                      <span style={{
-                        background: 'rgba(0, 168, 132, 0.15)',
-                        border: '1px solid rgba(0, 168, 132, 0.4)',
-                        color: '#00a884',
-                        padding: '2px 8px',
-                        borderRadius: '10px',
-                        fontSize: '0.72rem',
-                        fontWeight: 700
-                      }}>
-                        Group Admin
-                      </span>
-                    )}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      {memberIsCreator && (
+                        <span style={{
+                          background: 'rgba(245, 158, 11, 0.18)',
+                          border: '1px solid rgba(245, 158, 11, 0.5)',
+                          color: '#f59e0b',
+                          padding: '2px 8px',
+                          borderRadius: '10px',
+                          fontSize: '0.72rem',
+                          fontWeight: 700
+                        }}>
+                          👑 Creator
+                        </span>
+                      )}
+                      {memberIsAdmin && !memberIsCreator && (
+                        <span style={{
+                          background: 'rgba(0, 168, 132, 0.15)',
+                          border: '1px solid rgba(0, 168, 132, 0.4)',
+                          color: '#00a884',
+                          padding: '2px 8px',
+                          borderRadius: '10px',
+                          fontSize: '0.72rem',
+                          fontWeight: 700
+                        }}>
+                          Admin
+                        </span>
+                      )}
+                    </div>
                   </div>
                 );
               })}
@@ -741,49 +782,84 @@ const GroupInfoModal = ({ group, onClose, onGroupUpdated, onGroupDeleted, onInit
               </div>
             </div>
 
+            <div style={{ padding: '12px 16px 4px 16px', background: '#111b21' }}>
+              <input
+                type="text"
+                placeholder="Search by username or ID..."
+                value={searchAddUser}
+                onChange={e => setSearchAddUser(e.target.value)}
+                style={{
+                  width: '100%',
+                  background: '#202c33',
+                  border: '1px solid #2a3942',
+                  borderRadius: '10px',
+                  padding: '10px 14px',
+                  color: '#e9edef',
+                  fontSize: '0.88rem',
+                  outline: 'none',
+                  boxSizing: 'border-box'
+                }}
+              />
+            </div>
+
             <div style={{ flex: 1, overflowY: 'auto', padding: '14px' }}>
               {loadingFriends ? (
-                <div style={{ textAlign: 'center', color: '#8696a0', padding: '30px' }}>Loading friends...</div>
-              ) : friends.length === 0 ? (
+                <div style={{ textAlign: 'center', color: '#8696a0', padding: '30px' }}>Loading users...</div>
+              ) : availableUsers.length === 0 ? (
                 <div style={{ textAlign: 'center', color: '#8696a0', padding: '30px', fontSize: '0.9rem' }}>
-                  All your friends are already in this group!
+                  No available users to add.
                 </div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                  {friends.map(f => {
-                    const isSelected = selectedNewMembers.has(f.id);
-                    return (
-                      <div 
-                        key={f.id}
-                        onClick={() => {
-                          const next = new Set(selectedNewMembers);
-                          if (next.has(f.id)) next.delete(f.id);
-                          else next.add(f.id);
-                          setSelectedNewMembers(next);
-                        }}
-                        style={{
-                          display: 'flex', alignItems: 'center', gap: '12px',
-                          padding: '10px 12px', borderRadius: '10px', cursor: 'pointer',
-                          background: isSelected ? 'rgba(0, 168, 132, 0.12)' : 'transparent'
-                        }}
-                      >
-                        <input 
-                          type="checkbox" 
-                          checked={isSelected}
-                          readOnly
-                          style={{ accentColor: '#00a884', transform: 'scale(1.2)' }}
-                        />
-                        <Avatar userId={f.id} username={f.username} size={42} />
-                        <div style={{ color: '#e9edef', fontWeight: 600, fontSize: '0.92rem' }}>{f.username}</div>
-                      </div>
-                    );
-                  })}
+                  {availableUsers
+                    .filter(u => (u.username || '').toLowerCase().includes(searchAddUser.toLowerCase()) || (u.id || '').toLowerCase().includes(searchAddUser.toLowerCase()))
+                    .map(f => {
+                      const fId = f.id || f._id;
+                      const isSelected = selectedNewMembers.has(fId);
+                      return (
+                        <div 
+                          key={fId}
+                          onClick={() => {
+                            const next = new Set(selectedNewMembers);
+                            if (next.has(fId)) next.delete(fId);
+                            else next.add(fId);
+                            setSelectedNewMembers(next);
+                          }}
+                          style={{
+                            display: 'flex', alignItems: 'center', gap: '12px',
+                            padding: '10px 12px', borderRadius: '10px', cursor: 'pointer',
+                            background: isSelected ? 'rgba(0, 168, 132, 0.16)' : 'rgba(32, 44, 51, 0.6)',
+                            border: isSelected ? '1px solid #00a884' : '1px solid transparent',
+                            transition: 'all 0.15s ease'
+                          }}
+                        >
+                          <input 
+                            type="checkbox" 
+                            checked={isSelected}
+                            readOnly
+                            style={{ accentColor: '#00a884', transform: 'scale(1.2)' }}
+                          />
+                          <Avatar userId={fId} username={f.username} size={42} />
+                          <div style={{ flex: 1 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <span style={{ color: '#e9edef', fontWeight: 600, fontSize: '0.92rem' }}>{f.username}</span>
+                              {f.isFriend && (
+                                <span style={{ fontSize: '0.68rem', background: 'rgba(59, 130, 246, 0.15)', color: '#60a5fa', padding: '1px 6px', borderRadius: '6px' }}>Friend</span>
+                              )}
+                            </div>
+                            <div style={{ color: '#8696a0', fontSize: '0.75rem', marginTop: '2px' }}>
+                              ID: {fId.length > 12 ? fId.substring(0, 12) + '...' : fId}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
                 </div>
               )}
             </div>
 
             {selectedNewMembers.size > 0 && (
-              <div style={{ padding: '16px 20px', borderTop: '1px solid #202c33', display: 'flex', justifyContent: 'flex-end' }}>
+              <div style={{ padding: '16px 20px', borderTop: '1px solid #202c33', display: 'flex', justifyContent: 'flex-end', background: '#111b21' }}>
                 <button
                   onClick={handleAddMembersSubmit}
                   style={{
@@ -792,7 +868,7 @@ const GroupInfoModal = ({ group, onClose, onGroupUpdated, onGroupDeleted, onInit
                     fontSize: '0.92rem', cursor: 'pointer', boxShadow: '0 4px 12px rgba(0,168,132,0.4)'
                   }}
                 >
-                  Add ({selectedNewMembers.size})
+                  Add ({selectedNewMembers.size}) Participants
                 </button>
               </div>
             )}

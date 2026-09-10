@@ -11,6 +11,7 @@ import GuestLoginModal from './components/GuestLoginModal';
 import AuthContext from './context/AuthContext';
 import UserSidebar from './components/UserSidebar';
 import CallOverlay from './components/CallOverlay';
+import GroupCallOverlay from './components/GroupCallOverlay';
 import AccountModal from './components/AccountModal';
 import SettingsMenu from './components/SettingsMenu';
 import NotificationsMenu from './components/NotificationsMenu';
@@ -42,6 +43,15 @@ function App() {
   const [showLanguage, setShowLanguage] = useState(false);
   const [showAiBot, setShowAiBot] = useState(false);
   const [showUpdatesModal, setShowUpdatesModal] = useState(false);
+
+  // Group Call State
+  const [groupCallSession, setGroupCallSession] = useState({
+    active: false,
+    groupId: null,
+    groupName: '',
+    callType: 'video'
+  });
+  const [activeGroupCalls, setActiveGroupCalls] = useState({}); // groupId -> { isActive, callType, participantsCount, initiator }
 
   const menuRef = useRef(null);
   const [resetToken, setResetToken] = useState(null);
@@ -309,10 +319,46 @@ function App() {
       socket.emit('join_group', group.id);
     };
 
+    const handleGroupCallStatusUpdate = (data) => {
+      console.log("Group call status update:", data);
+      setActiveGroupCalls(prev => {
+        if (!data.isActive) {
+          const next = { ...prev };
+          delete next[data.groupId];
+          return next;
+        }
+        return { ...prev, [data.groupId]: data };
+      });
+    };
+
+    const handleActiveGroupCallsList = (callsList) => {
+      const map = {};
+      (callsList || []).forEach(c => {
+        map[c.groupId] = { ...c, isActive: true };
+      });
+      setActiveGroupCalls(map);
+    };
+
+    const handleGroupCallEnded = ({ groupId }) => {
+      setActiveGroupCalls(prev => {
+        const next = { ...prev };
+        delete next[groupId];
+        return next;
+      });
+      setGroupCallSession(prev => (prev.groupId === groupId ? { active: false, groupId: null, groupName: '', callType: 'video' } : prev));
+    };
+
     socket.on('receive_friend_request', handleFriendRequestReceived);
     socket.on('receive_private_message', handleUnreadMessage);
     socket.on('receive_group_message', handleUnreadMessage);
     socket.on('added_to_group', handleAddedToGroup);
+    socket.on('group_call_status_update', handleGroupCallStatusUpdate);
+    socket.on('active_group_calls_list', handleActiveGroupCallsList);
+    socket.on('group_call_ended', handleGroupCallEnded);
+
+    if (user) {
+      socket.emit('get_active_group_calls');
+    }
 
     return () => {
       socket.off('call_incoming', handleIncomingCall);
@@ -326,8 +372,29 @@ function App() {
       socket.off('receive_private_message', handleUnreadMessage);
       socket.off('receive_group_message', handleUnreadMessage);
       socket.off('added_to_group', handleAddedToGroup);
+      socket.off('group_call_status_update', handleGroupCallStatusUpdate);
+      socket.off('active_group_calls_list', handleActiveGroupCallsList);
+      socket.off('group_call_ended', handleGroupCallEnded);
     };
   }, [user, token, socket]);
+
+  const handleInitiateGroupCall = (groupId, groupName, callType = 'video') => {
+    setGroupCallSession({
+      active: true,
+      groupId,
+      groupName: groupName || 'Group Call',
+      callType: callType || 'video'
+    });
+  };
+
+  const handleLeaveGroupCall = () => {
+    setGroupCallSession({
+      active: false,
+      groupId: null,
+      groupName: '',
+      callType: 'video'
+    });
+  };
 
   const resetCallSession = () => {
     iceCandidatesMap.current = {};
@@ -520,6 +587,7 @@ function App() {
                 isSearchingStranger={isSearchingStranger}
                 setIsSearchingStranger={setIsSearchingStranger}
                 unreadCounts={unreadCounts}
+                activeGroupCalls={activeGroupCalls}
               />
             </div>
 
@@ -529,8 +597,11 @@ function App() {
                   socket={socket}
                   activeChat={activeChat}
                   onInitiateCall={initiateCall}
+                  onInitiateGroupCall={handleInitiateGroupCall}
+                  activeGroupCalls={activeGroupCalls}
                   users={users}
                   myGroups={myGroups}
+                  setMyGroups={setMyGroups}
                   onlineUsers={onlineUsers}
                   onBackToSidebar={() => {
                     setActiveChat(null);
@@ -633,6 +704,17 @@ function App() {
               onDeclineCall={resetCallSession}
               role={callSession.role}
               callType={callSession.callType}
+            />
+          )}
+
+          {groupCallSession.active && (
+            <GroupCallOverlay
+              socket={socket}
+              user={user}
+              groupId={groupCallSession.groupId}
+              groupName={groupCallSession.groupName}
+              callType={groupCallSession.callType}
+              onLeaveCall={handleLeaveGroupCall}
             />
           )}
         </div>
