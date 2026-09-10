@@ -1,7 +1,12 @@
 const express = require('express');
 const router = express.Router();
 const supabase = require('../supabaseClient');
-const bcrypt = require('bcrypt');
+let bcrypt;
+try {
+  bcrypt = require('bcryptjs');
+} catch (e) {
+  bcrypt = require('bcrypt');
+}
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const { sendVerificationEmail, sendPasswordResetEmail } = require('../utils/email');
@@ -130,13 +135,20 @@ router.post('/login', async (req, res) => {
   try {
     const { loginId, password } = req.body;
 
-    // 1. Fetch user by email or username
-    const isEmail = loginId && loginId.includes('@');
+    if (!loginId || !password) {
+      return res.status(400).json({ msg: 'Please provide email/username and password' });
+    }
+
+    const cleanLoginId = String(loginId).trim();
+    const cleanPassword = String(password);
+
+    // 1. Fetch user by email or username (case-insensitive)
+    const isEmail = cleanLoginId.includes('@');
     let query = supabase.from('users').select('*');
     if (isEmail) {
-      query = query.eq('email', loginId);
+      query = query.ilike('email', cleanLoginId);
     } else {
-      query = query.eq('username', loginId);
+      query = query.ilike('username', cleanLoginId);
     }
 
     const { data: userProfile, error: profileError } = await query.maybeSingle();
@@ -147,12 +159,17 @@ router.post('/login', async (req, res) => {
 
     // 2. Compare password
     // Some legacy users might have 'handled_by_supabase_auth' if they were created during the Supabase transition.
-    // If they do, they can't login via custom auth unless they reset password.
     if (userProfile.password === 'handled_by_supabase_auth') {
       return res.status(400).json({ msg: 'Please reset your password using the Forgot Password link to migrate your account.' });
     }
 
-    const isMatch = await bcrypt.compare(password, userProfile.password);
+    let isMatch = false;
+    try {
+      isMatch = await bcrypt.compare(cleanPassword, userProfile.password);
+    } catch (bcryptErr) {
+      console.warn("Bcrypt comparison error:", bcryptErr);
+    }
+
     if (!isMatch) {
       return res.status(400).json({ msg: 'Invalid login credentials' });
     }
@@ -170,8 +187,8 @@ router.post('/login', async (req, res) => {
       } 
     });
   } catch (err) {
-    console.error(err.message);
-    res.status(500).json({ msg: 'Server error' });
+    console.error('Login error:', err.message);
+    res.status(500).json({ msg: 'Server error during login' });
   }
 });
 
