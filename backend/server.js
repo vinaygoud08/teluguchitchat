@@ -58,6 +58,8 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // Serve static frontend assets if available
 const possibleDistPaths = [
+  path.join(process.cwd(), 'dist'),
+  path.join(process.cwd(), 'frontend/dist'),
   path.join(__dirname, '../dist'),
   path.join(__dirname, '../frontend/dist'),
   path.join(__dirname, 'dist')
