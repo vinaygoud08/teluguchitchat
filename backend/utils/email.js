@@ -12,6 +12,10 @@ const transporter = nodemailer.createTransport({
 });
 
 const sendVerificationEmail = async (email, token) => {
+  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+    console.log('Skipping verification email (EMAIL_USER / EMAIL_PASS not configured)');
+    return;
+  }
   const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
   const verificationLink = `${FRONTEND_URL}/verify-email?token=${token}`;
 
@@ -33,11 +37,14 @@ const sendVerificationEmail = async (email, token) => {
     console.log('Verification email sent to:', email);
   } catch (error) {
     console.error('Error sending verification email:', error);
-    throw error;
   }
 };
 
 const sendPasswordResetEmail = async (email, token) => {
+  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+    console.log('Skipping password reset email (EMAIL_USER / EMAIL_PASS not configured)');
+    return;
+  }
   const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
   const resetLink = `${FRONTEND_URL}/reset-password?token=${token}`;
 
@@ -61,7 +68,6 @@ const sendPasswordResetEmail = async (email, token) => {
     console.log('Password reset email sent to:', email);
   } catch (error) {
     console.error('Error sending password reset email:', error);
-    throw error;
   }
 };
 

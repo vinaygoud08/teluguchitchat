@@ -2,7 +2,12 @@ const express = require('express');
 const router = express.Router();
 const supabase = require('../supabaseClient');
 const jwt = require('jsonwebtoken');
-const bcrypt = require('bcrypt');
+let bcrypt;
+try {
+  bcrypt = require('bcryptjs');
+} catch (e) {
+  bcrypt = require('bcrypt');
+}
 
 const verifyToken = async (req, res, next) => {
   const token = req.header('x-auth-token');
@@ -319,86 +324,68 @@ router.put('/me', verifyToken, async (req, res) => {
 router.post('/change-password', verifyToken, async (req, res) => {
   try {
     const { newPassword } = req.body;
+    if (!newPassword || newPassword.length < 6) {
+      return res.status(400).json({ msg: 'Password must be at least 6 characters long' });
+    }
 
-    // With Supabase Auth, you don't need to verify the old password if they are already authenticated,
-    // you can just call updateUser to set the new password.
-    const { error: updateError } = await supabase.auth.updateUser(
-      { password: newPassword },
-      { headers: { Authorization: `Bearer ${req.header('x-auth-token')}` } }
-    );
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(newPassword, salt);
 
-    if (updateError) return res.status(400).json({ msg: updateError.message });
+    const { error: updateError } = await supabase
+      .from('users')
+      .update({ password: hashedPassword })
+      .eq('id', req.user.id);
+
+    if (updateError) {
+      console.error('Password Update Error:', updateError);
+      return res.status(500).json({ msg: 'Failed to update password' });
+    }
+
+    // Also sync to Supabase Auth admin if possible
+    try {
+      await supabase.auth.admin.updateUserById(req.user.id, { password: newPassword });
+    } catch (authSyncErr) {
+      console.warn('Supabase auth password sync warning:', authSyncErr.message);
+    }
 
     res.json({ msg: 'Password changed successfully' });
   } catch (err) {
-    console.error(err);
+    console.error('Change password error:', err);
     res.status(500).send('Server error');
   }
 });
 
-// Record a story view
+// Record a view for a target user's story
 router.post('/story-view/:targetUserId', verifyToken, async (req, res) => {
   try {
-    const viewerId = req.user.id;
-    const ownerId = req.params.targetUserId;
-    if (viewerId === ownerId) return res.json({ msg: 'Viewed own story' });
+    const { targetUserId } = req.params;
+    const currentUserId = req.user.id;
 
-    // Check if view already exists
-    const { data: existing } = await supabase
-      .from('messages')
-      .select('id')
-      .match({ room: 'story_view', senderId: viewerId, recipientId: ownerId })
-      .single();
+    if (targetUserId === currentUserId) return res.json({ msg: 'Own story' });
 
-    if (!existing) {
-      await supabase
-        .from('messages')
-        .insert([{
-          room: 'story_view',
-          senderId: viewerId,
-          recipientId: ownerId,
-          text: 'viewed'
-        }]);
-    }
-    res.json({ msg: 'Story view recorded' });
-  } catch (err) {
-    console.error(err);
-    res.status(500).send('Server error');
-  }
-});
-
-// Get viewers of my story
-router.get('/story-views', verifyToken, async (req, res) => {
-  try {
-    const ownerId = req.user.id;
-    const { data: views, error } = await supabase
-      .from('messages')
-      .select('senderId, timestamp')
-      .match({ room: 'story_view', recipientId: ownerId })
-      .order('timestamp', { ascending: false });
-      
-    if (error) throw error;
-    
-    if (!views || views.length === 0) {
-      return res.json([]);
-    }
-    
-    const viewerIds = [...new Set(views.map(v => v.senderId))];
-    const { data: usersData } = await supabase
+    // Fetch the target user's story views
+    const { data: targetUser, error: fetchError } = await supabase
       .from('users')
-      .select('id, username')
-      .in('id', viewerIds);
-      
-    // Combine to get view time
-    const result = viewerIds.map(vid => {
-      const u = usersData?.find(user => user.id === vid) || { username: 'Unknown' };
-      const vTime = views.find(v => v.senderId === vid).timestamp;
-      return { id: vid, username: u.username, viewed_at: vTime };
-    });
-      
-    res.json(result);
+      .select('story_views')
+      .eq('id', targetUserId)
+      .single();
+    
+    if (fetchError) throw fetchError;
+
+    const views = targetUser?.story_views || [];
+    
+    // If we haven't already viewed it, add our ID
+    if (!views.includes(currentUserId)) {
+      const { error: updateError } = await supabase
+        .from('users')
+        .update({ story_views: [...views, currentUserId] })
+        .eq('id', targetUserId);
+      if (updateError) throw updateError;
+    }
+
+    res.json({ msg: 'View recorded' });
   } catch (err) {
-    console.error(err);
+    console.error('Record story view error:', err);
     res.status(500).send('Server error');
   }
 });
@@ -414,54 +401,18 @@ router.get('/story-views', verifyToken, async (req, res) => {
     
     if (userError) throw userError;
 
-    const viewerIds = user.story_views || [];
+    const viewerIds = user?.story_views || [];
     if (viewerIds.length === 0) return res.json([]);
 
     const { data: viewers, error: viewersError } = await supabase
       .from('users')
-      .select('id, username, _id')
+      .select('id, username')
       .in('id', viewerIds);
 
     if (viewersError) throw viewersError;
     res.json(viewers || []);
   } catch (err) {
-    console.error(err);
-    res.status(500).send('Server error');
-  }
-});
-
-// Record a view for a target user's story
-router.post('/story-view/:targetUserId', verifyToken, async (req, res) => {
-  try {
-    const { targetUserId } = req.params;
-    const currentUserId = req.user.id;
-
-    // Don't record own view
-    if (targetUserId === currentUserId) return res.json({ msg: 'Own story' });
-
-    // Fetch the target user's story views
-    const { data: targetUser, error: fetchError } = await supabase
-      .from('users')
-      .select('story_views')
-      .eq('id', targetUserId)
-      .single();
-    
-    if (fetchError) throw fetchError;
-
-    const views = targetUser.story_views || [];
-    
-    // If we haven't already viewed it, add our ID
-    if (!views.includes(currentUserId)) {
-      const { error: updateError } = await supabase
-        .from('users')
-        .update({ story_views: [...views, currentUserId] })
-        .eq('id', targetUserId);
-      if (updateError) throw updateError;
-    }
-
-    res.json({ msg: 'View recorded' });
-  } catch (err) {
-    console.error(err);
+    console.error('Get story views error:', err);
     res.status(500).send('Server error');
   }
 });
