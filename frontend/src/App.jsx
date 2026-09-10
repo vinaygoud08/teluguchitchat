@@ -38,8 +38,28 @@ const socket = io(BACKEND_URL || '/', {
 
 function App() {
   const { playNotificationSound } = useSettings();
-  const [user, setUser] = useState(null);
-  const [token, setToken] = useState(localStorage.getItem('token'));
+  const [token, setToken] = useState(() => {
+    try {
+      const t = localStorage.getItem('token');
+      return (t && t !== 'undefined' && t !== 'null') ? t : null;
+    } catch(e) {
+      return null;
+    }
+  });
+
+  const [user, setUser] = useState(() => {
+    try {
+      const u = localStorage.getItem('user');
+      if (u && u !== 'undefined' && u !== 'null') {
+        const parsed = JSON.parse(u);
+        if (parsed && typeof parsed === 'object' && (parsed.id || parsed._id || parsed.username)) {
+          return parsed;
+        }
+      }
+    } catch(e) {}
+    return null;
+  });
+
   const [showLogin, setShowLogin] = useState(false);
   const [showRegister, setShowRegister] = useState(false);
   const [showForgotPassword, setShowForgotPassword] = useState(false);
@@ -150,18 +170,29 @@ function App() {
       axios.get('/api/users', {
         headers: { 'x-auth-token': token }
       }).then(res => {
-        setUsers(res.data);
+        if (Array.isArray(res.data)) {
+          setUsers(res.data);
+        }
       }).catch(err => console.error(err));
 
       // Fetch current user with populated friends and requests
       axios.get('/api/users/me', {
         headers: { 'x-auth-token': token }
       }).then(res => {
-        setUser(res.data);
-        localStorage.setItem('user', JSON.stringify(res.data));
+        if (res.data && typeof res.data === 'object' && (res.data.id || res.data._id || res.data.username)) {
+          setUser(res.data);
+          localStorage.setItem('user', JSON.stringify(res.data));
+        } else {
+          // If response is not a valid user JSON (e.g., HTML from SPA rewrite or invalid token)
+          console.warn("Invalid user payload received, resetting auth");
+          localStorage.removeItem('token');
+          localStorage.removeItem('user');
+          setToken(null);
+          setUser(null);
+        }
       }).catch(err => {
         console.error("Error fetching /api/users/me:", err);
-        if (err.response?.status === 401) {
+        if (err.response?.status === 401 || err.response?.status === 404) {
           localStorage.removeItem('token');
           localStorage.removeItem('user');
           setToken(null);
@@ -172,7 +203,11 @@ function App() {
       // Fetch user's groups
       axios.get('/api/groups/my-groups', {
         headers: { 'x-auth-token': token }
-      }).then(res => setMyGroups(res.data)).catch(err => {
+      }).then(res => {
+        if (Array.isArray(res.data)) {
+          setMyGroups(res.data);
+        }
+      }).catch(err => {
         console.error("Error fetching my-groups:", err);
       });
 
