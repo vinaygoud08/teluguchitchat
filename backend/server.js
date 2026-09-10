@@ -56,35 +56,43 @@ app.use('/version', require('./routes/version'));
 
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-// Serve static frontend assets if available
-const possibleDistPaths = [
-  path.join(process.cwd(), 'dist'),
-  path.join(process.cwd(), 'frontend/dist'),
-  path.join(__dirname, '../dist'),
-  path.join(__dirname, '../frontend/dist'),
-  path.join(__dirname, 'dist')
-];
-
-let activeDistPath = null;
-for (const p of possibleDistPaths) {
-  if (fs.existsSync(p)) {
-    activeDistPath = p;
-    break;
+// Dynamic static file & SPA serving
+app.use('/assets', (req, res, next) => {
+  const assetCandidates = [
+    path.join(process.cwd(), 'dist/assets', req.path),
+    path.join(process.cwd(), 'frontend/dist/assets', req.path),
+    path.join(__dirname, '../dist/assets', req.path),
+    path.join(__dirname, '../frontend/dist/assets', req.path),
+    path.join(__dirname, 'dist/assets', req.path)
+  ];
+  for (const a of assetCandidates) {
+    if (fs.existsSync(a)) {
+      return res.sendFile(a);
+    }
   }
-}
+  next();
+});
 
-if (activeDistPath) {
-  app.use(express.static(activeDistPath));
-  app.use((req, res, next) => {
-    if (req.method === 'GET' && !req.path.startsWith('/api') && !req.path.startsWith('/auth') && !req.path.startsWith('/users') && !req.path.startsWith('/socket.io')) {
-      const indexPath = path.join(activeDistPath, 'index.html');
-      if (fs.existsSync(indexPath)) {
-        return res.sendFile(indexPath);
+app.use((req, res, next) => {
+  if (req.method === 'GET' && !req.path.startsWith('/api') && !req.path.startsWith('/auth') && !req.path.startsWith('/users') && !req.path.startsWith('/socket.io')) {
+    const candidateIndexPaths = [
+      path.join(process.cwd(), 'dist/index.html'),
+      path.join(process.cwd(), 'frontend/dist/index.html'),
+      path.join(__dirname, '../dist/index.html'),
+      path.join(__dirname, '../frontend/dist/index.html'),
+      path.join(__dirname, 'dist/index.html'),
+      path.join(__dirname, '../frontend/index.html'),
+      path.join(__dirname, 'index.html')
+    ];
+
+    for (const p of candidateIndexPaths) {
+      if (fs.existsSync(p)) {
+        return res.sendFile(p);
       }
     }
-    next();
-  });
-}
+  }
+  next();
+});
 
 // Socket.io logic
 const onlineUsers = new Map(); // socket.id -> userId
