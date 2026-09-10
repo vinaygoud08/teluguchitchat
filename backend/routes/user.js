@@ -2,12 +2,7 @@ const express = require('express');
 const router = express.Router();
 const supabase = require('../supabaseClient');
 const jwt = require('jsonwebtoken');
-let bcrypt;
-try {
-  bcrypt = require('bcryptjs');
-} catch (e) {
-  bcrypt = require('bcrypt');
-}
+const bcrypt = require('bcryptjs');
 
 const verifyToken = async (req, res, next) => {
   const token = req.header('x-auth-token');

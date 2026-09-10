@@ -23,9 +23,11 @@ const LoginModal = ({ onClose, onForgotPassword, onRegister, onGuestLogin }) => 
       }
     } catch (err) {
       if (!err.response || err.response.status === 404) {
-        setError('Backend server is not connected. Please verify that the backend is deployed on Render/Railway and VITE_BACKEND_URL is set in Vercel.');
+        setError('Backend server is not reachable (404/Network). If using Vercel, ensure Environment Variables are configured in Vercel Settings.');
+      } else if (err.response.status === 500) {
+        setError(err.response?.data?.msg || 'Internal server error (500). Please ensure SUPABASE_URL & SUPABASE_KEY are set in Vercel Environment Variables.');
       } else {
-        setError(err.response?.data?.msg || 'Invalid login credentials');
+        setError(err.response?.data?.msg || 'Invalid login credentials. Please check your username/email and password.');
       }
     }
   };

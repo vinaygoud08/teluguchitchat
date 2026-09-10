@@ -1,12 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const supabase = require('../supabaseClient');
-let bcrypt;
-try {
-  bcrypt = require('bcryptjs');
-} catch (e) {
-  bcrypt = require('bcrypt');
-}
+const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const { sendVerificationEmail, sendPasswordResetEmail } = require('../utils/email');
