@@ -7,14 +7,7 @@
     <meta name="theme-color" content="#1a1440" />
     <title>Chit Chat Telugu - Fast, Secure & Fun Chat</title>
     <script>
-      window.global = window.globalThis || window;
-      window.process = window.process || { env: {} };
-      if (typeof window.require === 'undefined') {
-        window.require = function(pkg) {
-          console.warn('Polyfilled require call intercepted for module:', pkg);
-          return {};
-        };
-      }
+      window.global = window;
     </script>
     <style>
       body, html {
