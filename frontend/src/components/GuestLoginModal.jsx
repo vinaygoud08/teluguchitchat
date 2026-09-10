@@ -44,9 +44,17 @@ const GuestLoginModal = ({ onClose }) => {
 
     try {
       const res = await axios.post('/api/auth/guest-login', { name, age: calculatedAge, gender });
-      login(res.data.user, res.data.token);
+      if (res.data && res.data.token && res.data.user) {
+        login(res.data.user, res.data.token);
+      } else {
+        setError('Invalid response received from server.');
+      }
     } catch (err) {
-      setError(err.response?.data?.msg || 'An error occurred during guest login');
+      if (!err.response || err.response.status === 404) {
+        setError('Backend server is not connected. Please verify that the backend is deployed on Render/Railway and VITE_BACKEND_URL is set in Vercel.');
+      } else {
+        setError(err.response?.data?.msg || 'An error occurred during guest login');
+      }
     }
   };
 

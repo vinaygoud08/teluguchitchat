@@ -58,10 +58,13 @@ const RegisterModal = ({ onClose }) => {
 
     try {
       const res = await axios.post('/api/auth/register', { username, email, password, age: calculatedAge, gender, birthday: birthDateStr, country });
-      setSuccessMsg(res.data.msg);
-      setError('');
+      setSuccessMsg(res.data?.msg || 'Registration successful! You can now log in.');
     } catch (err) {
-      setError(err.response?.data?.msg || 'An error occurred');
+      if (!err.response || err.response.status === 404) {
+        setError('Backend server is not connected. Please verify that the backend is deployed on Render/Railway and VITE_BACKEND_URL is set in Vercel.');
+      } else {
+        setError(err.response?.data?.msg || 'An error occurred during registration');
+      }
       setSuccessMsg('');
     }
   };
