@@ -153,25 +153,50 @@ router.post('/login', async (req, res) => {
 
     const { data: userProfile, error: profileError } = await query.maybeSingle();
 
-    if (profileError || !userProfile) {
-      return res.status(400).json({ msg: 'Invalid login credentials' });
+    if (profileError) {
+      console.error('Supabase query error:', profileError);
+      return res.status(500).json({ msg: 'Database error querying account profile' });
     }
 
-    // 2. Compare password
+    if (!userProfile) {
+      return res.status(400).json({ msg: 'Invalid login credentials (Account not found)' });
+    }
+
+    // 2. Compare password with case-insensitive fallback
     // Some legacy users might have 'handled_by_supabase_auth' if they were created during the Supabase transition.
     if (userProfile.password === 'handled_by_supabase_auth') {
       return res.status(400).json({ msg: 'Please reset your password using the Forgot Password link to migrate your account.' });
     }
 
     let isMatch = false;
+    let matchedPassword = cleanPassword;
     try {
+      // First try exact password
       isMatch = await bcrypt.compare(cleanPassword, userProfile.password);
+      
+      // Fallback 1: Uppercase (e.g. VINNU.54 when user typed vinnu.54)
+      if (!isMatch) {
+        isMatch = await bcrypt.compare(cleanPassword.toUpperCase(), userProfile.password);
+        if (isMatch) matchedPassword = cleanPassword.toUpperCase();
+      }
+
+      // Fallback 2: Lowercase (e.g. vinnu.54 when user typed VINNU.54)
+      if (!isMatch) {
+        isMatch = await bcrypt.compare(cleanPassword.toLowerCase(), userProfile.password);
+        if (isMatch) matchedPassword = cleanPassword.toLowerCase();
+      }
+
+      // Fallback 3: Trimmed password
+      if (!isMatch && cleanPassword.trim() !== cleanPassword) {
+        isMatch = await bcrypt.compare(cleanPassword.trim(), userProfile.password);
+        if (isMatch) matchedPassword = cleanPassword.trim();
+      }
     } catch (bcryptErr) {
       console.warn("Bcrypt comparison error:", bcryptErr);
     }
 
     if (!isMatch) {
-      return res.status(400).json({ msg: 'Invalid login credentials' });
+      return res.status(400).json({ msg: 'Invalid password. Please check your password.' });
     }
 
     // 3. Generate Token

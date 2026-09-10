@@ -14,7 +14,6 @@
   "type": "commonjs",
   "dependencies": {
     "@supabase/supabase-js": "^2.110.7",
-    "bcrypt": "^6.0.0",
     "bcryptjs": "^3.0.3",
     "cors": "^2.8.6",
     "crypto": "^1.0.1",
