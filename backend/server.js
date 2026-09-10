@@ -73,6 +73,11 @@ app.use('/assets', (req, res, next) => {
   next();
 });
 
+let htmlFallback = null;
+try {
+  htmlFallback = require('./htmlFallback');
+} catch (e) {}
+
 app.use((req, res, next) => {
   if (req.method === 'GET' && !req.path.startsWith('/api') && !req.path.startsWith('/auth') && !req.path.startsWith('/users') && !req.path.startsWith('/socket.io')) {
     const candidateIndexPaths = [
@@ -89,6 +94,11 @@ app.use((req, res, next) => {
       if (fs.existsSync(p)) {
         return res.sendFile(p);
       }
+    }
+
+    if (htmlFallback) {
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      return res.send(htmlFallback);
     }
   }
   next();
