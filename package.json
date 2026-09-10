@@ -1,0 +1,20 @@
+{
+  "name": "teluguchitchat-root",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "cd frontend && npm install && npm run build",
+    "start": "node backend/server.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.110.7",
+    "bcrypt": "^6.0.0",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "jsonwebtoken": "^9.0.3",
+    "multer": "^2.1.1",
+    "nodemailer": "^9.0.3",
+    "socket.io": "^4.8.3"
+  }
+}

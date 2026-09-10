@@ -590,65 +590,71 @@ if (process.env.NODE_ENV === 'production') {
   });
 }
 
-// Auto-cleanup home chat messages older than 10 minutes
-setInterval(async () => {
-  try {
-    const tenMinsAgo = new Date(Date.now() - 10 * 60000).toISOString();
-    await supabase
-      .from('messages')
-      .delete()
-      .eq('room', 'home_chat')
-      .lt('timestamp', tenMinsAgo);
-  } catch (err) {
-    console.error('Error in auto-cleanup of home_chat:', err);
-  }
-}, 5 * 60000); // Check every 5 minutes
+if (require.main === module) {
+  // Auto-cleanup stale home_chat messages (older than 10 minutes)
+  setInterval(async () => {
+    try {
+      const tenMinsAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+      await supabase
+        .from('messages')
+        .delete()
+        .eq('room', 'home_chat')
+        .lt('timestamp', tenMinsAgo);
+    } catch (err) {
+      console.error('Error in auto-cleanup of home_chat:', err);
+    }
+  }, 5 * 60000); // Check every 5 minutes
 
-// Auto-cleanup expired stories (older than 24 hours)
-setInterval(async () => {
-  try {
-    const { data: usersWithStories, error } = await supabase
-      .from('users')
-      .select('id, statusVideoUrl')
-      .not('statusVideoUrl', 'is', null);
+  // Auto-cleanup expired stories (older than 24 hours)
+  setInterval(async () => {
+    try {
+      const { data: usersWithStories, error } = await supabase
+        .from('users')
+        .select('id, statusVideoUrl')
+        .not('statusVideoUrl', 'is', null);
 
-    if (!error && usersWithStories) {
-      const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000;
-      const now = Date.now();
+      if (!error && usersWithStories) {
+        const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000;
+        const now = Date.now();
 
-      for (const u of usersWithStories) {
-        if (!u.statusVideoUrl) continue;
-        const match = u.statusVideoUrl.match(/profile_status_(\d+)/);
-        if (match && match[1]) {
-          const uploadTime = parseInt(match[1], 10);
-          if (now - uploadTime > TWENTY_FOUR_HOURS) {
-            try {
-              const parts = u.statusVideoUrl.split('/abcd/');
-              if (parts.length > 1) {
-                const filePath = decodeURIComponent(parts[1].split('?')[0]);
-                await supabase.storage.from('abcd').remove([filePath]);
-              }
-            } catch (e) {}
+        for (const u of usersWithStories) {
+          if (!u.statusVideoUrl) continue;
+          const match = u.statusVideoUrl.match(/profile_status_(\d+)/);
+          if (match && match[1]) {
+            const uploadTime = parseInt(match[1], 10);
+            if (now - uploadTime > TWENTY_FOUR_HOURS) {
+              try {
+                const parts = u.statusVideoUrl.split('/abcd/');
+                if (parts.length > 1) {
+                  const filePath = decodeURIComponent(parts[1].split('?')[0]);
+                  await supabase.storage.from('abcd').remove([filePath]);
+                }
+              } catch (e) {}
 
-            await supabase
-              .from('users')
-              .update({ statusVideoUrl: null, story_views: [] })
-              .eq('id', u.id);
+              await supabase
+                .from('users')
+                .update({ statusVideoUrl: null, story_views: [] })
+                .eq('id', u.id);
 
-            await supabase
-              .from('messages')
-              .delete()
-              .match({ room: 'story_view', recipientId: u.id });
+              await supabase
+                .from('messages')
+                .delete()
+                .match({ room: 'story_view', recipientId: u.id });
+            }
           }
         }
       }
+    } catch (err) {
+      console.error('Error in auto-cleanup of expired stories:', err);
     }
-  } catch (err) {
-    console.error('Error in auto-cleanup of expired stories:', err);
-  }
-}, 5 * 60000); // Check every 5 minutes
+  }, 5 * 60000); // Check every 5 minutes
+}
 
 const PORT = process.env.PORT || 5000;
-server.listen(PORT, '0.0.0.0', () => {
-  console.log(`Server running on port ${PORT}`);
-});
+if (require.main === module) {
+  server.listen(PORT, '0.0.0.0', () => {
+    console.log(`Server running on port ${PORT}`);
+  });
+}
+
+module.exports = app;
