@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "build": "npm run build --prefix frontend && node -e \"const fs=require('fs'); if (fs.existsSync('frontend/dist')) { fs.cpSync('frontend/dist', 'dist', {recursive:true}); const html = fs.readFileSync('dist/index.html', 'utf8'); fs.writeFileSync('backend/htmlFallback.js', 'module.exports = ' + JSON.stringify(html) + ';'); }\"",
+    "build": "npm run build --prefix frontend",
     "start": "node backend/server.js"
   },
   "dependencies": {
