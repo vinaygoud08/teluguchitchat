@@ -28,11 +28,37 @@ const supabase = require('./supabaseClient');
 
 const fs = require('fs');
 
-// Make io accessible in routes
-app.set('io', io);
+let htmlFallback = null;
+try {
+  htmlFallback = require('./htmlFallback');
+} catch (e) {}
 
-// Health check endpoint
-app.get(['/health', '/api/health'], (req, res) => {
+// Explicit root route
+app.get('/', (req, res) => {
+  if (htmlFallback) {
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    return res.send(htmlFallback);
+  }
+  const candidateIndexPaths = [
+    path.join(process.cwd(), 'dist/index.html'),
+    path.join(process.cwd(), 'frontend/dist/index.html'),
+    path.join(__dirname, '../dist/index.html'),
+    path.join(__dirname, '../frontend/dist/index.html'),
+    path.join(__dirname, 'dist/index.html')
+  ];
+  for (const p of candidateIndexPaths) {
+    if (fs.existsSync(p)) {
+      return res.sendFile(p);
+    }
+  }
+  res.status(200).send('<!doctype html><html><head><title>Chit Chat Telugu</title></head><body><div id="root">Loading Chit Chat Telugu...</div></body></html>');
+});
+
+// Health check endpoints
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok', app: 'Chit Chat Telugu Backend', time: new Date().toISOString() });
+});
+app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', app: 'Chit Chat Telugu Backend', time: new Date().toISOString() });
 });
 
@@ -72,11 +98,6 @@ app.use('/assets', (req, res, next) => {
   }
   next();
 });
-
-let htmlFallback = null;
-try {
-  htmlFallback = require('./htmlFallback');
-} catch (e) {}
 
 app.use((req, res, next) => {
   if (req.method === 'GET' && !req.path.startsWith('/api') && !req.path.startsWith('/auth') && !req.path.startsWith('/users') && !req.path.startsWith('/socket.io')) {
