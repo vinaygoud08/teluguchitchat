@@ -4,6 +4,10 @@ import basicSsl from '@vitejs/plugin-basic-ssl'
 
 // https://vite.dev/config/
 export default defineConfig(({ command }) => ({
+  define: {
+    global: 'globalThis',
+    'process.env': {}
+  },
   plugins: [
     react(),
     ...(command === 'serve' ? [basicSsl()] : [])
