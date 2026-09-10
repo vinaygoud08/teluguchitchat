@@ -25,7 +25,16 @@ import { LanguageProvider } from './context/LanguageContext';
 import { useSettings } from './context/SettingsContext';
 import { generateKeyPair, exportPublicKey, exportPrivateKey } from './utils/crypto';
 
-const socket = io(import.meta.env.VITE_BACKEND_URL || '/');
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') ? 'http://localhost:5000' : '');
+
+const socket = io(BACKEND_URL || '/', {
+  transports: ['websocket', 'polling'],
+  timeout: 15000,
+  autoConnect: true,
+  reconnection: true,
+  reconnectionAttempts: 10,
+  reconnectionDelay: 2000
+});
 
 function App() {
   const { playNotificationSound } = useSettings();
@@ -150,12 +159,22 @@ function App() {
       }).then(res => {
         setUser(res.data);
         localStorage.setItem('user', JSON.stringify(res.data));
-      }).catch(err => console.error(err));
+      }).catch(err => {
+        console.error("Error fetching /api/users/me:", err);
+        if (err.response?.status === 401) {
+          localStorage.removeItem('token');
+          localStorage.removeItem('user');
+          setToken(null);
+          setUser(null);
+        }
+      });
 
       // Fetch user's groups
       axios.get('/api/groups/my-groups', {
         headers: { 'x-auth-token': token }
-      }).then(res => setMyGroups(res.data)).catch(console.error);
+      }).then(res => setMyGroups(res.data)).catch(err => {
+        console.error("Error fetching my-groups:", err);
+      });
 
     } else {
       setUsers([]);
