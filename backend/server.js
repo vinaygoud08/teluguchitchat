@@ -26,10 +26,17 @@ const io = new Server(server, {
 
 const supabase = require('./supabaseClient');
 
+const fs = require('fs');
+
 // Make io accessible in routes
 app.set('io', io);
 
-// Routes
+// Health check endpoint
+app.get(['/health', '/api/health'], (req, res) => {
+  res.json({ status: 'ok', app: 'Chit Chat Telugu Backend', time: new Date().toISOString() });
+});
+
+// Mount Routes with /api prefix
 app.use('/api/users', require('./routes/user'));
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/messages', require('./routes/messages'));
@@ -37,7 +44,45 @@ app.use('/api/media', require('./routes/media'));
 app.use('/api/groups', require('./routes/groups'));
 app.use('/api/ai', require('./routes/ai'));
 app.use('/api/version', require('./routes/version'));
+
+// Also mount routes without /api prefix for serverless compatibility
+app.use('/users', require('./routes/user'));
+app.use('/auth', require('./routes/auth'));
+app.use('/messages', require('./routes/messages'));
+app.use('/media', require('./routes/media'));
+app.use('/groups', require('./routes/groups'));
+app.use('/ai', require('./routes/ai'));
+app.use('/version', require('./routes/version'));
+
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+// Serve static frontend assets if available
+const possibleDistPaths = [
+  path.join(__dirname, '../dist'),
+  path.join(__dirname, '../frontend/dist'),
+  path.join(__dirname, 'dist')
+];
+
+let activeDistPath = null;
+for (const p of possibleDistPaths) {
+  if (fs.existsSync(p)) {
+    activeDistPath = p;
+    break;
+  }
+}
+
+if (activeDistPath) {
+  app.use(express.static(activeDistPath));
+  app.use((req, res, next) => {
+    if (req.method === 'GET' && !req.path.startsWith('/api') && !req.path.startsWith('/auth') && !req.path.startsWith('/users') && !req.path.startsWith('/socket.io')) {
+      const indexPath = path.join(activeDistPath, 'index.html');
+      if (fs.existsSync(indexPath)) {
+        return res.sendFile(indexPath);
+      }
+    }
+    next();
+  });
+}
 
 // Socket.io logic
 const onlineUsers = new Map(); // socket.id -> userId
