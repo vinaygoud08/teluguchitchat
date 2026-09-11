@@ -51,7 +51,19 @@ const GuestLoginModal = ({ onClose }) => {
       }
     } catch (err) {
       console.error('Guest login request failed:', err);
-      const serverMsg = err.response?.data?.msg || err.response?.data?.error || (typeof err.response?.data === 'string' && err.response.data.length < 150 ? err.response.data : null);
+      let serverMsg = '';
+      const data = err.response?.data;
+      if (typeof data === 'string' && data.length < 200) {
+        serverMsg = data;
+      } else if (data?.msg && typeof data.msg === 'string') {
+        serverMsg = data.msg;
+      } else if (data?.message && typeof data.message === 'string') {
+        serverMsg = data.message;
+      } else if (data?.error) {
+        if (typeof data.error === 'string') serverMsg = data.error;
+        else if (typeof data.error === 'object' && data.error?.message) serverMsg = String(data.error.message);
+      }
+
       if (!err.response || err.response.status === 404) {
         setError('Backend server is not reachable (404/Network).');
       } else if (err.response.status === 500) {
@@ -162,7 +174,7 @@ const GuestLoginModal = ({ onClose }) => {
               </div>
             </div>
           </div>
-          {error && <div className="error-text" style={{ marginTop: '10px' }}>{error}</div>}
+          {error && <div className="error-text" style={{ marginTop: '10px' }}>{typeof error === 'string' ? error : (error?.message || error?.msg || '')}</div>}
           <div className="modal-actions" style={{ display: 'flex', gap: '10px', marginTop: '20px' }}>
             <button type="button" className="btn-secondary" onClick={onClose} style={{ flex: 1, padding: '10px', borderRadius: '8px', border: '1px solid #ccc' }}>Cancel</button>
             <button type="submit" className="btn-primary" style={{ flex: 1, backgroundColor: '#4CAF50', padding: '10px', borderRadius: '8px', border: 'none' }}>Login as Guest</button>

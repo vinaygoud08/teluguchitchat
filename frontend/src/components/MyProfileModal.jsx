@@ -103,7 +103,7 @@ function MyProfileModal({ initialTab = 'account', onClose }) {
         </div>
 
         {message && <div className="success-text" style={{ color: 'var(--success)', textAlign: 'center', marginBottom: '10px', fontSize: '0.9rem' }}>{message}</div>}
-        {error && <div className="error-text" style={{ marginBottom: '10px' }}>{error}</div>}
+        {error && <div className="error-text" style={{ marginBottom: '10px' }}>{typeof error === 'string' ? error : (error?.message || error?.msg || '')}</div>}
 
         {activeTab === 'account' && (
           <form className="profile-form" onSubmit={handleUpdateProfile}>

@@ -68,7 +68,7 @@ const ProfileEditor = ({ onClose }) => {
       <div className="modal-content" onClick={e => e.stopPropagation()}>
         <h2 className="modal-title">Upload Status</h2>
         
-        {error && <div className="error-text">{error}</div>}
+        {error && <div className="error-text">{typeof error === 'string' ? error : (error?.message || error?.msg || '')}</div>}
 
         <div className="form-group">
           <label style={{ fontWeight: 'bold' }}>Status Video (Max 30s, mp4)</label>

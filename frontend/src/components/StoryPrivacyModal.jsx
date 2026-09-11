@@ -53,7 +53,7 @@ function StoryPrivacyModal({ onClose }) {
           Select the friends who you do NOT want to see your stories.
         </div>
 
-        {error && <div style={{ color: '#ff5252', padding: '10px 20px', fontSize: '0.9rem' }}>{error}</div>}
+        {error && <div style={{ color: '#ff5252', padding: '10px 20px', fontSize: '0.9rem' }}>{typeof error === 'string' ? error : (error?.message || error?.msg || '')}</div>}
 
         <div className="settings-list" style={{ maxHeight: '50vh', overflowY: 'auto' }}>
           {friends.length === 0 ? (

@@ -307,7 +307,7 @@ function AccountModal({ onClose, onLogout, onDeleteAccount }) {
           {showPasswordChange && (
             <div className="password-change-box">
               {message && <div className="success-text">{message}</div>}
-              {error && <div className="error-text">{error}</div>}
+              {error && <div className="error-text">{typeof error === 'string' ? error : (error?.message || error?.msg || '')}</div>}
               <form onSubmit={handlePasswordChange}>
                 <input type="password" placeholder="Current Password" required value={passwords.currentPassword} onChange={e => setPasswords({...passwords, currentPassword: e.target.value})} className="account-input" />
                 <input type="password" placeholder="New Password" required minLength="6" value={passwords.newPassword} onChange={e => setPasswords({...passwords, newPassword: e.target.value})} className="account-input" />

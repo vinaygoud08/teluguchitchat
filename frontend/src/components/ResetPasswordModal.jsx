@@ -66,7 +66,7 @@ const ResetPasswordModal = ({ token, onClose }) => {
                 </button>
               </div>
             </div>
-            {error && <div className="error-text">{error}</div>}
+            {error && <div className="error-text">{typeof error === 'string' ? error : (error?.message || error?.msg || '')}</div>}
             <div className="modal-actions">
               <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
               <button type="submit" className="btn-primary">Reset Password</button>
