@@ -9,12 +9,21 @@ dotenv.config({ path: path.join(__dirname, '../backend/.env') });
 
 const { createClient } = require('@supabase/supabase-js');
 
-// Create a single supabase client for interacting with your database
-const supabaseUrl = process.env.SUPABASE_URL || 'https://dummy.supabase.co';
-// Use the service role key to bypass RLS since the backend is a trusted environment
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY || 'dummy';
+// Clean and extract environment variables
+const cleanEnv = (val) => {
+  if (!val) return '';
+  let str = String(val).trim();
+  if ((str.startsWith('"') && str.endsWith('"')) || (str.startsWith("'") && str.endsWith("'"))) {
+    str = str.slice(1, -1).trim();
+  }
+  return str;
+};
 
-if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+const supabaseUrl = cleanEnv(process.env.SUPABASE_URL) || 'https://dummy.supabase.co';
+// Use the service role key to bypass RLS since the backend is a trusted environment
+const supabaseKey = cleanEnv(process.env.SUPABASE_SERVICE_ROLE_KEY) || cleanEnv(process.env.SUPABASE_KEY) || 'dummy';
+
+if (!cleanEnv(process.env.SUPABASE_URL) || !cleanEnv(process.env.SUPABASE_SERVICE_ROLE_KEY)) {
   console.warn('WARNING: SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY are not set!');
 }
 
@@ -23,3 +32,4 @@ const supabase = createClient(supabaseUrl, supabaseKey, {
 });
 
 module.exports = supabase;
+

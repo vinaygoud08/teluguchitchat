@@ -22,12 +22,15 @@ const LoginModal = ({ onClose, onForgotPassword, onRegister, onGuestLogin }) => 
         setError('Invalid response received from server.');
       }
     } catch (err) {
+      console.error('Login request failed:', err);
+      const serverMsg = err.response?.data?.msg || err.response?.data?.error || (typeof err.response?.data === 'string' && err.response.data.length < 150 ? err.response.data : null);
+      
       if (!err.response || err.response.status === 404) {
-        setError('Backend server is not reachable (404/Network). If using Vercel, ensure Environment Variables are configured in Vercel Settings.');
+        setError('Backend server is not reachable (404/Network). If using Vercel, check Vercel deployment status.');
       } else if (err.response.status === 500) {
-        setError(err.response?.data?.msg || 'Internal server error (500). Please ensure SUPABASE_URL & SUPABASE_KEY are set in Vercel Environment Variables.');
+        setError(serverMsg || 'Internal server error (500). Please check Vercel Logs or verify environment variables in Vercel Settings.');
       } else {
-        setError(err.response?.data?.msg || 'Invalid login credentials. Please check your username/email and password.');
+        setError(serverMsg || 'Invalid login credentials. Please check your username/email and password.');
       }
     }
   };

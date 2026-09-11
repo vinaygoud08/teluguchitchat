@@ -50,12 +50,14 @@ const GuestLoginModal = ({ onClose }) => {
         setError('Invalid response received from server.');
       }
     } catch (err) {
+      console.error('Guest login request failed:', err);
+      const serverMsg = err.response?.data?.msg || err.response?.data?.error || (typeof err.response?.data === 'string' && err.response.data.length < 150 ? err.response.data : null);
       if (!err.response || err.response.status === 404) {
-        setError('Backend server is not reachable (404/Network). If using Vercel, ensure Environment Variables are configured in Vercel Settings.');
+        setError('Backend server is not reachable (404/Network).');
       } else if (err.response.status === 500) {
-        setError(err.response?.data?.msg || 'Internal server error (500). Please ensure SUPABASE_URL & SUPABASE_KEY are set in Vercel Environment Variables.');
+        setError(serverMsg || 'Internal server error (500). Please check Vercel Logs or environment variables.');
       } else {
-        setError(err.response?.data?.msg || 'An error occurred during guest login');
+        setError(serverMsg || 'An error occurred during guest login');
       }
     }
   };
