@@ -24,20 +24,106 @@ const io = new Server(server, {
   }
 });
 
-const supabase = require('./supabaseClient');
+const supabase = require('./supabaseClient.cjs');
 
-// Make io accessible in routes
-app.set('io', io);
+const fs = require('fs');
 
-// Routes
-app.use('/api/users', require('./routes/user'));
-app.use('/api/auth', require('./routes/auth'));
-app.use('/api/messages', require('./routes/messages'));
-app.use('/api/media', require('./routes/media'));
-app.use('/api/groups', require('./routes/groups'));
-app.use('/api/ai', require('./routes/ai'));
-app.use('/api/version', require('./routes/version'));
+let htmlFallback = null;
+try {
+  htmlFallback = require('./htmlFallback.cjs');
+} catch (e) {}
+
+// Explicit root route
+app.get('/', (req, res) => {
+  if (htmlFallback) {
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    return res.send(htmlFallback);
+  }
+  const candidateIndexPaths = [
+    path.join(process.cwd(), 'dist/index.html'),
+    path.join(process.cwd(), 'frontend/dist/index.html'),
+    path.join(__dirname, '../dist/index.html'),
+    path.join(__dirname, '../frontend/dist/index.html'),
+    path.join(__dirname, 'dist/index.html')
+  ];
+  for (const p of candidateIndexPaths) {
+    if (fs.existsSync(p)) {
+      return res.sendFile(p);
+    }
+  }
+  res.status(200).send('<!doctype html><html><head><title>Chit Chat Telugu</title></head><body><div id="root">Loading Chit Chat Telugu...</div></body></html>');
+});
+
+// Health check endpoints
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok', app: 'Chit Chat Telugu Backend', time: new Date().toISOString() });
+});
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'ok', app: 'Chit Chat Telugu Backend', time: new Date().toISOString() });
+});
+
+// Mount Routes with /api prefix
+app.use('/api/users', require('./routes/user.cjs'));
+app.use('/api/auth', require('./routes/auth.cjs'));
+app.use('/api/messages', require('./routes/messages.cjs'));
+app.use('/api/media', require('./routes/media.cjs'));
+app.use('/api/groups', require('./routes/groups.cjs'));
+app.use('/api/ai', require('./routes/ai.cjs'));
+app.use('/api/version', require('./routes/version.cjs'));
+
+// Also mount routes without /api prefix for serverless compatibility
+app.use('/users', require('./routes/user.cjs'));
+app.use('/auth', require('./routes/auth.cjs'));
+app.use('/messages', require('./routes/messages.cjs'));
+app.use('/media', require('./routes/media.cjs'));
+app.use('/groups', require('./routes/groups.cjs'));
+app.use('/ai', require('./routes/ai.cjs'));
+app.use('/version', require('./routes/version.cjs'));
+
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+// Dynamic static file & SPA serving
+app.use('/assets', (req, res, next) => {
+  const assetCandidates = [
+    path.join(process.cwd(), 'dist/assets', req.path),
+    path.join(process.cwd(), 'frontend/dist/assets', req.path),
+    path.join(__dirname, '../dist/assets', req.path),
+    path.join(__dirname, '../frontend/dist/assets', req.path),
+    path.join(__dirname, 'dist/assets', req.path)
+  ];
+  for (const a of assetCandidates) {
+    if (fs.existsSync(a)) {
+      return res.sendFile(a);
+    }
+  }
+  next();
+});
+
+app.use((req, res, next) => {
+  if (req.method === 'GET' && !req.path.startsWith('/api') && !req.path.startsWith('/auth') && !req.path.startsWith('/users') && !req.path.startsWith('/socket.io')) {
+    const candidateIndexPaths = [
+      path.join(process.cwd(), 'dist/index.html'),
+      path.join(process.cwd(), 'frontend/dist/index.html'),
+      path.join(__dirname, '../dist/index.html'),
+      path.join(__dirname, '../frontend/dist/index.html'),
+      path.join(__dirname, 'dist/index.html'),
+      path.join(__dirname, '../frontend/index.html'),
+      path.join(__dirname, 'index.html')
+    ];
+
+    for (const p of candidateIndexPaths) {
+      if (fs.existsSync(p)) {
+        return res.sendFile(p);
+      }
+    }
+
+    if (htmlFallback) {
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      return res.send(htmlFallback);
+    }
+  }
+  next();
+});
 
 // Socket.io logic
 const onlineUsers = new Map(); // socket.id -> userId
@@ -546,7 +632,7 @@ io.on('connection', (socket) => {
 
   socket.on('save_call_history', async (data) => {
     try {
-      const supabase = require('./supabaseClient');
+      const supabase = require('./supabaseClient.cjs');
 
       // Insert a message into the chat like WhatsApp
       const { data: callerInfo } = await supabase.from('users').select('username').eq('id', data.caller_id).single();
@@ -590,65 +676,71 @@ if (process.env.NODE_ENV === 'production') {
   });
 }
 
-// Auto-cleanup home chat messages older than 10 minutes
-setInterval(async () => {
-  try {
-    const tenMinsAgo = new Date(Date.now() - 10 * 60000).toISOString();
-    await supabase
-      .from('messages')
-      .delete()
-      .eq('room', 'home_chat')
-      .lt('timestamp', tenMinsAgo);
-  } catch (err) {
-    console.error('Error in auto-cleanup of home_chat:', err);
-  }
-}, 5 * 60000); // Check every 5 minutes
+if (require.main === module) {
+  // Auto-cleanup stale home_chat messages (older than 10 minutes)
+  setInterval(async () => {
+    try {
+      const tenMinsAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+      await supabase
+        .from('messages')
+        .delete()
+        .eq('room', 'home_chat')
+        .lt('timestamp', tenMinsAgo);
+    } catch (err) {
+      console.error('Error in auto-cleanup of home_chat:', err);
+    }
+  }, 5 * 60000); // Check every 5 minutes
 
-// Auto-cleanup expired stories (older than 24 hours)
-setInterval(async () => {
-  try {
-    const { data: usersWithStories, error } = await supabase
-      .from('users')
-      .select('id, statusVideoUrl')
-      .not('statusVideoUrl', 'is', null);
+  // Auto-cleanup expired stories (older than 24 hours)
+  setInterval(async () => {
+    try {
+      const { data: usersWithStories, error } = await supabase
+        .from('users')
+        .select('id, statusVideoUrl')
+        .not('statusVideoUrl', 'is', null);
 
-    if (!error && usersWithStories) {
-      const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000;
-      const now = Date.now();
+      if (!error && usersWithStories) {
+        const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000;
+        const now = Date.now();
 
-      for (const u of usersWithStories) {
-        if (!u.statusVideoUrl) continue;
-        const match = u.statusVideoUrl.match(/profile_status_(\d+)/);
-        if (match && match[1]) {
-          const uploadTime = parseInt(match[1], 10);
-          if (now - uploadTime > TWENTY_FOUR_HOURS) {
-            try {
-              const parts = u.statusVideoUrl.split('/abcd/');
-              if (parts.length > 1) {
-                const filePath = decodeURIComponent(parts[1].split('?')[0]);
-                await supabase.storage.from('abcd').remove([filePath]);
-              }
-            } catch (e) {}
+        for (const u of usersWithStories) {
+          if (!u.statusVideoUrl) continue;
+          const match = u.statusVideoUrl.match(/profile_status_(\d+)/);
+          if (match && match[1]) {
+            const uploadTime = parseInt(match[1], 10);
+            if (now - uploadTime > TWENTY_FOUR_HOURS) {
+              try {
+                const parts = u.statusVideoUrl.split('/abcd/');
+                if (parts.length > 1) {
+                  const filePath = decodeURIComponent(parts[1].split('?')[0]);
+                  await supabase.storage.from('abcd').remove([filePath]);
+                }
+              } catch (e) {}
 
-            await supabase
-              .from('users')
-              .update({ statusVideoUrl: null, story_views: [] })
-              .eq('id', u.id);
+              await supabase
+                .from('users')
+                .update({ statusVideoUrl: null, story_views: [] })
+                .eq('id', u.id);
 
-            await supabase
-              .from('messages')
-              .delete()
-              .match({ room: 'story_view', recipientId: u.id });
+              await supabase
+                .from('messages')
+                .delete()
+                .match({ room: 'story_view', recipientId: u.id });
+            }
           }
         }
       }
+    } catch (err) {
+      console.error('Error in auto-cleanup of expired stories:', err);
     }
-  } catch (err) {
-    console.error('Error in auto-cleanup of expired stories:', err);
-  }
-}, 5 * 60000); // Check every 5 minutes
+  }, 5 * 60000); // Check every 5 minutes
+}
 
 const PORT = process.env.PORT || 5000;
-server.listen(PORT, '0.0.0.0', () => {
-  console.log(`Server running on port ${PORT}`);
-});
+if (require.main === module) {
+  server.listen(PORT, '0.0.0.0', () => {
+    console.log(`Server running on port ${PORT}`);
+  });
+}
+
+module.exports = app;

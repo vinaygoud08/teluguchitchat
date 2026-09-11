@@ -44,33 +44,9 @@ const GuestLoginModal = ({ onClose }) => {
 
     try {
       const res = await axios.post('/api/auth/guest-login', { name, age: calculatedAge, gender });
-      if (res.data && res.data.token && res.data.user) {
-        login(res.data.user, res.data.token);
-      } else {
-        setError('Invalid response received from server.');
-      }
+      login(res.data.user, res.data.token);
     } catch (err) {
-      console.error('Guest login request failed:', err);
-      let serverMsg = '';
-      const data = err.response?.data;
-      if (typeof data === 'string' && data.length < 200) {
-        serverMsg = data;
-      } else if (data?.msg && typeof data.msg === 'string') {
-        serverMsg = data.msg;
-      } else if (data?.message && typeof data.message === 'string') {
-        serverMsg = data.message;
-      } else if (data?.error) {
-        if (typeof data.error === 'string') serverMsg = data.error;
-        else if (typeof data.error === 'object' && data.error?.message) serverMsg = String(data.error.message);
-      }
-
-      if (!err.response || err.response.status === 404) {
-        setError('Backend server is not reachable (404/Network).');
-      } else if (err.response.status === 500) {
-        setError(serverMsg || 'Internal server error (500). Please check Vercel Logs or environment variables.');
-      } else {
-        setError(serverMsg || 'An error occurred during guest login');
-      }
+      setError(err.response?.data?.msg || 'An error occurred during guest login');
     }
   };
 
@@ -174,7 +150,7 @@ const GuestLoginModal = ({ onClose }) => {
               </div>
             </div>
           </div>
-          {error && <div className="error-text" style={{ marginTop: '10px' }}>{typeof error === 'string' ? error : (error?.message || error?.msg || '')}</div>}
+          {error && <div className="error-text" style={{ marginTop: '10px' }}>{error}</div>}
           <div className="modal-actions" style={{ display: 'flex', gap: '10px', marginTop: '20px' }}>
             <button type="button" className="btn-secondary" onClick={onClose} style={{ flex: 1, padding: '10px', borderRadius: '8px', border: '1px solid #ccc' }}>Cancel</button>
             <button type="submit" className="btn-primary" style={{ flex: 1, backgroundColor: '#4CAF50', padding: '10px', borderRadius: '8px', border: 'none' }}>Login as Guest</button>

@@ -20,7 +20,7 @@ const handleMulterError = (err, req, res, next) => {
   next();
 };
 
-const supabase = require('../supabaseClient');
+const supabase = require('../supabaseClient.cjs');
 
 const verifyToken = async (req, res, next) => {
   const token = req.header('x-auth-token');

@@ -1,42 +1,11 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+
 import basicSsl from '@vitejs/plugin-basic-ssl'
 
 // https://vite.dev/config/
-export default defineConfig(({ command }) => ({
-  define: {
-    global: 'globalThis',
-    'process.env': {}
-  },
-  plugins: [
-    react(),
-    ...(command === 'serve' ? [basicSsl()] : [])
-  ],
-  build: {
-    outDir: 'dist',
-    chunkSizeWarningLimit: 1500,
-    rollupOptions: {
-      output: {
-        manualChunks(id) {
-          if (id.includes('node_modules')) {
-            if (id.includes('react') || id.includes('react-dom')) {
-              return 'vendor-react';
-            }
-            if (id.includes('socket.io-client') || id.includes('axios')) {
-              return 'vendor-network';
-            }
-            if (id.includes('lucide-react')) {
-              return 'vendor-icons';
-            }
-            if (id.includes('emoji-picker-react')) {
-              return 'vendor-emoji';
-            }
-            return 'vendor-others';
-          }
-        }
-      }
-    }
-  },
+export default defineConfig({
+  plugins: [react(), basicSsl()],
   server: {
     host: true,
     allowedHosts: true,
@@ -63,4 +32,4 @@ export default defineConfig(({ command }) => ({
       }
     }
   }
-}))
+})

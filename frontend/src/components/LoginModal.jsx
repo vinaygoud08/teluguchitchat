@@ -13,36 +13,11 @@ const LoginModal = ({ onClose, onForgotPassword, onRegister, onGuestLogin }) => 
 
   const handleLogin = async (e) => {
     e.preventDefault();
-    setError('');
     try {
       const res = await axios.post('/api/auth/login', { loginId, password });
-      if (res.data && res.data.token && res.data.user) {
-        login(res.data.user, res.data.token);
-      } else {
-        setError('Invalid response received from server.');
-      }
+      login(res.data.user, res.data.token);
     } catch (err) {
-      console.error('Login request failed:', err);
-      let serverMsg = '';
-      const data = err.response?.data;
-      if (typeof data === 'string' && data.length < 200) {
-        serverMsg = data;
-      } else if (data?.msg && typeof data.msg === 'string') {
-        serverMsg = data.msg;
-      } else if (data?.message && typeof data.message === 'string') {
-        serverMsg = data.message;
-      } else if (data?.error) {
-        if (typeof data.error === 'string') serverMsg = data.error;
-        else if (typeof data.error === 'object' && data.error?.message) serverMsg = String(data.error.message);
-      }
-      
-      if (!err.response || err.response.status === 404) {
-        setError('Backend server is not reachable (404/Network).');
-      } else if (err.response.status === 500) {
-        setError(serverMsg || 'Internal server error (500). Please check Vercel Logs or environment variables.');
-      } else {
-        setError(serverMsg || 'Invalid login credentials. Please check your username/email and password.');
-      }
+      setError(err.response?.data?.msg || 'An error occurred');
     }
   };
 
@@ -152,7 +127,7 @@ const LoginModal = ({ onClose, onForgotPassword, onRegister, onGuestLogin }) => 
                   </button>
                 </div>
               </div>
-              {error && <div className="error-text">{typeof error === 'string' ? error : (error?.message || error?.msg || '')}</div>}
+              {error && <div className="error-text">{error}</div>}
               <div className="modal-actions" style={{ display: 'flex', gap: '10px', marginTop: '20px' }}>
                 <button type="button" className="btn-secondary" style={{ flex: 1, padding: '10px', borderRadius: '8px', border: '1px solid #ccc' }} onClick={onClose}>Cancel</button>
                 <button type="submit" className="btn-primary" style={{ flex: 1, padding: '10px', borderRadius: '8px', border: 'none' }}>Login</button>

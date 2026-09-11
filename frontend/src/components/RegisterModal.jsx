@@ -58,13 +58,10 @@ const RegisterModal = ({ onClose }) => {
 
     try {
       const res = await axios.post('/api/auth/register', { username, email, password, age: calculatedAge, gender, birthday: birthDateStr, country });
-      setSuccessMsg(res.data?.msg || 'Registration successful! You can now log in.');
+      setSuccessMsg(res.data.msg);
+      setError('');
     } catch (err) {
-      if (!err.response || err.response.status === 404) {
-        setError('Backend server is not connected. Please verify that the backend is deployed on Render/Railway and VITE_BACKEND_URL is set in Vercel.');
-      } else {
-        setError(err.response?.data?.msg || 'An error occurred during registration');
-      }
+      setError(err.response?.data?.msg || 'An error occurred');
       setSuccessMsg('');
     }
   };
@@ -230,7 +227,7 @@ const RegisterModal = ({ onClose }) => {
                 I am 18+ and agree to the Terms and Conditions.
               </label>
             </div>
-            {error && <div className="error-text">{typeof error === 'string' ? error : (error?.message || error?.msg || '')}</div>}
+            {error && <div className="error-text">{error}</div>}
             <div className="modal-actions">
               <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
               <button type="submit" className="btn-primary">Sign up</button>

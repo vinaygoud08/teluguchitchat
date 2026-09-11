@@ -2,13 +2,13 @@
   "name": "teluguchitchat-root",
   "version": "1.0.0",
   "private": true,
-  "type": "module",
   "scripts": {
     "build": "npm --prefix backend install && npm --prefix frontend install && npm --prefix frontend run build",
-    "start": "node backend/server.js"
+    "start": "node backend/server.cjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.110.7",
+    "bcrypt": "^6.0.0",
     "bcryptjs": "^3.0.3",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
