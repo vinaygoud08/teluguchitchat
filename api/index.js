@@ -79,6 +79,12 @@ app.use('/groups', require('../backend/routes/groups'));
 app.use('/ai', require('../backend/routes/ai'));
 app.use('/version', require('../backend/routes/version'));
 
+// Request Logger
+app.use((req, res, next) => {
+  console.log(`[Vercel Serverless] ${req.method} ${req.url} (originalUrl: ${req.originalUrl})`);
+  next();
+});
+
 // Global Error Handler
 app.use((err, req, res, next) => {
   console.error('Serverless Global Error:', err);
@@ -87,5 +93,8 @@ app.use((err, req, res, next) => {
   });
 });
 
-export default app;
+export default function handler(req, res) {
+  return app(req, res);
+}
+
 
