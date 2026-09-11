@@ -130,8 +130,8 @@ const ProfileViewer = ({ userProfile, onClose }) => {
           <div style={{ display: 'flex', justifyContent: 'center', gap: '8px', flexWrap: 'wrap', marginBottom: '18px' }}>
             {displayUser.gender && (
               <span style={{ 
-                background: displayUser.gender.toLowerCase() === 'female' ? '#fdf2f8' : '#eff6ff', 
-                color: displayUser.gender.toLowerCase() === 'female' ? '#db2777' : '#2563eb', 
+                background: (displayUser.gender || '').toLowerCase() === 'female' ? '#fdf2f8' : '#eff6ff', 
+                color: (displayUser.gender || '').toLowerCase() === 'female' ? '#db2777' : '#2563eb', 
                 padding: '4px 10px', 
                 borderRadius: '20px', 
                 fontSize: '0.8rem', 

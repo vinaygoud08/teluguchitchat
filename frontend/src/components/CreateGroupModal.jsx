@@ -103,8 +103,8 @@ function CreateGroupModal({ onClose, onGroupCreated }) {
     }
   };
 
-  const filteredFriends = friends.filter(f =>
-    f.username.toLowerCase().includes(search.toLowerCase())
+  const filteredFriends = (friends || []).filter(f =>
+    f && (f.username || '').toLowerCase().includes((search || '').toLowerCase())
   );
 
   const selectedList = friends.filter(f => selectedFriends.has(f.id));

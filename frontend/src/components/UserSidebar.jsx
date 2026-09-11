@@ -174,32 +174,33 @@ const UserSidebar = ({
     }
   };
 
-  const filteredFriends = friends.filter(u =>
-    u.username.toLowerCase().includes(search.toLowerCase())
+  const filteredFriends = (friends || []).filter(u =>
+    u && (u.username || '').toLowerCase().includes((search || '').toLowerCase())
   );
 
   const sortedFriends = [...filteredFriends].sort((a, b) => {
-    const aId = a.id || a._id;
-    const bId = b.id || b._id;
+    const aId = a?.id || a?._id || '';
+    const bId = b?.id || b?._id || '';
     const aTime = recentConversations[aId]?.lastMessageTime ? new Date(recentConversations[aId].lastMessageTime).getTime() : 0;
     const bTime = recentConversations[bId]?.lastMessageTime ? new Date(recentConversations[bId].lastMessageTime).getTime() : 0;
     if (bTime !== aTime) {
       return bTime - aTime;
     }
-    return (a.username || '').localeCompare(b.username || '');
+    return (a?.username || '').localeCompare(b?.username || '');
   });
 
-  const searchedUsers = users.filter(u => {
+  const searchedUsers = (users || []).filter(u => {
+    if (!u) return false;
     if (!search) return false;
     const s = search.toLowerCase();
-    if (friends.some(f => (f.id || f._id) === (u.id || u._id))) return false;
-    if (friendRequests.some(r => (r.id || r._id) === (u.id || u._id))) return false;
-    return (u.id && u.id.toLowerCase().includes(s)) || 
-           (u.email && u.email.toLowerCase().includes(s)) ||
-           (u.username && u.username.toLowerCase().includes(s));
+    if ((friends || []).some(f => (f?.id || f?._id) === (u.id || u._id))) return false;
+    if ((friendRequests || []).some(r => (r?.id || r?._id) === (u.id || u._id))) return false;
+    return (u.id && String(u.id).toLowerCase().includes(s)) || 
+           (u.email && String(u.email).toLowerCase().includes(s)) ||
+           (u.username && String(u.username).toLowerCase().includes(s));
   });
 
-  const friendsWithStories = filteredFriends.filter(f => f.statusVideoUrl);
+  const friendsWithStories = filteredFriends.filter(f => f && f.statusVideoUrl);
 
   const renderStoriesTray = () => (
     <div className="stories-horizontal-tray">

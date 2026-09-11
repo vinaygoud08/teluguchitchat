@@ -24,10 +24,10 @@ class ErrorBoundary extends Component {
 
   handleReload = () => {
     try {
-      localStorage.removeItem('user');
-      localStorage.removeItem('appSettings_notifications');
+      localStorage.clear();
+      sessionStorage.clear();
     } catch(e) {}
-    window.location.reload(true);
+    window.location.reload();
   };
 
   render() {
@@ -51,15 +51,30 @@ class ErrorBoundary extends Component {
             border: '1px solid rgba(255, 255, 255, 0.1)',
             padding: '36px 28px',
             borderRadius: '24px',
-            maxWidth: '460px',
+            maxWidth: '480px',
             backdropFilter: 'blur(16px)',
             boxShadow: '0 20px 40px rgba(0,0,0,0.5)'
           }}>
             <div style={{ fontSize: '3rem', marginBottom: '12px' }}>💬</div>
             <h2 style={{ fontSize: '1.4rem', fontWeight: 800, margin: '0 0 10px 0' }}>Chit Chat Telugu</h2>
             <p style={{ color: '#94a3b8', fontSize: '0.92rem', lineHeight: '1.5', margin: '0 0 20px 0' }}>
-              The application encountered a temporary display issue. Tap below to refresh and load the latest version.
+              The application encountered a temporary display issue. Tap below to reset cache and reload.
             </p>
+            {this.state.error?.message && (
+              <div style={{ 
+                background: 'rgba(239, 68, 68, 0.1)', 
+                border: '1px solid rgba(239, 68, 68, 0.2)', 
+                color: '#f87171', 
+                padding: '8px 12px', 
+                borderRadius: '8px', 
+                fontSize: '0.8rem', 
+                marginBottom: '16px',
+                textAlign: 'left',
+                overflowWrap: 'break-word'
+              }}>
+                {this.state.error.message}
+              </div>
+            )}
             <button
               onClick={this.handleReload}
               style={{
@@ -74,7 +89,7 @@ class ErrorBoundary extends Component {
                 boxShadow: '0 8px 20px rgba(99,102,241,0.4)'
               }}
             >
-              🔄 Refresh & Load App
+              🔄 Reset & Reload App
             </button>
           </div>
         </div>
